@@ -20,6 +20,8 @@ public class MainForm : Form
     private RichTextBox lineNumbers;
     private RichTextBox codeEditor;
     private Panel minimapPanel;
+    private Panel scrollbarPanel;
+    private Panel scrollbarThumb;
 
     // Tab management
     private List<TabInfo> tabs = new List<TabInfo>();
@@ -30,6 +32,8 @@ public class MainForm : Form
     private bool isDragging = false;
     private Point dragOffset;
     private bool isHighlighting = false;
+    private bool isScrollbarDragging = false;
+    private int scrollbarDragOffset = 0;
 
     private class TabInfo
     {
@@ -372,26 +376,87 @@ public class MainForm : Form
         lineNumbers.DeselectAll();
         editorPanel.Controls.Add(lineNumbers);
 
-        // Code editor (between line numbers and minimap)
+        // Custom scrollbar on the right (dark/black style)
+        scrollbarPanel = new Panel
+        {
+            Size = new Size(12, editorPanel.Height),
+            Location = new Point(editorPanel.Width - 112, 0), // Left of minimap
+            BackColor = Color.FromArgb(20, 20, 20)
+        };
+        scrollbarPanel.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Right;
+
+        scrollbarThumb = new Panel
+        {
+            Size = new Size(8, 50),
+            Location = new Point(2, 0),
+            BackColor = Color.FromArgb(50, 50, 50),
+            Cursor = Cursors.Hand
+        };
+        RoundCorners(scrollbarThumb, 4);
+
+        // Scrollbar thumb dragging
+        scrollbarThumb.MouseDown += (s, e) =>
+        {
+            if (e.Button == MouseButtons.Left)
+            {
+                isScrollbarDragging = true;
+                scrollbarDragOffset = e.Y;
+            }
+        };
+        scrollbarThumb.MouseMove += (s, e) =>
+        {
+            if (isScrollbarDragging)
+            {
+                int newY = scrollbarThumb.Top + e.Y - scrollbarDragOffset;
+                newY = Math.Max(0, Math.Min(scrollbarPanel.Height - scrollbarThumb.Height, newY));
+                scrollbarThumb.Top = newY;
+
+                // Scroll the editor
+                int totalLines = Math.Max(1, codeEditor.Lines.Length);
+                int lineHeight = codeEditor.Font.Height;
+                float scrollPercent = (float)newY / (scrollbarPanel.Height - scrollbarThumb.Height);
+                int targetLine = (int)(scrollPercent * totalLines);
+                if (targetLine >= 0 && targetLine < codeEditor.Lines.Length)
+                {
+                    int charIndex = codeEditor.GetFirstCharIndexFromLine(targetLine);
+                    codeEditor.SelectionStart = charIndex;
+                    codeEditor.ScrollToCaret();
+                }
+            }
+        };
+        scrollbarThumb.MouseUp += (s, e) => isScrollbarDragging = false;
+        scrollbarThumb.MouseEnter += (s, e) => scrollbarThumb.BackColor = Color.FromArgb(70, 70, 70);
+        scrollbarThumb.MouseLeave += (s, e) => scrollbarThumb.BackColor = Color.FromArgb(50, 50, 50);
+
+        scrollbarPanel.Controls.Add(scrollbarThumb);
+        editorPanel.Controls.Add(scrollbarPanel);
+
+        // Code editor (between line numbers and scrollbar)
         codeEditor = new RichTextBox
         {
             Location = new Point(55, 0),
-            Size = new Size(editorPanel.Width - 55 - 100, editorPanel.Height),
+            Size = new Size(editorPanel.Width - 55 - 112, editorPanel.Height), // Leave space for scrollbar + minimap
             BackColor = BgEditor,
             ForeColor = TextWhite,
             Font = new Font("Consolas", 11f),
             BorderStyle = BorderStyle.None,
             AcceptsTab = true,
             WordWrap = false,
-            ScrollBars = RichTextBoxScrollBars.Vertical
+            ScrollBars = RichTextBoxScrollBars.None // Hide default scrollbar
         };
         codeEditor.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
         codeEditor.TextChanged += CodeEditor_TextChanged;
         codeEditor.VScroll += CodeEditor_VScroll;
+        codeEditor.MouseWheel += CodeEditor_MouseWheel;
 
         editorPanel.Controls.Add(codeEditor);
 
         this.Controls.Add(editorPanel);
+    }
+
+    private void CodeEditor_MouseWheel(object? sender, MouseEventArgs e)
+    {
+        UpdateScrollbarThumb();
     }
 
     private void MinimapPanel_Paint(object? sender, PaintEventArgs e)
@@ -686,7 +751,33 @@ public class MainForm : Form
             }
         }
 
+        UpdateScrollbarThumb();
         minimapPanel?.Invalidate();
+    }
+
+    private void UpdateScrollbarThumb()
+    {
+        if (scrollbarThumb == null || scrollbarPanel == null || codeEditor == null) return;
+        if (isScrollbarDragging) return; // Don't update while user is dragging
+
+        int totalLines = Math.Max(1, codeEditor.Lines.Length);
+        int visibleLines = Math.Max(1, codeEditor.Height / codeEditor.Font.Height);
+
+        // Calculate thumb size based on visible vs total content
+        int minThumbHeight = 30;
+        int thumbHeight = (int)((float)visibleLines / totalLines * scrollbarPanel.Height);
+        thumbHeight = Math.Max(minThumbHeight, Math.Min(scrollbarPanel.Height, thumbHeight));
+        scrollbarThumb.Height = thumbHeight;
+
+        // Calculate thumb position
+        int firstVisibleChar = codeEditor.GetCharIndexFromPosition(new Point(0, 0));
+        int firstVisibleLine = codeEditor.GetLineFromCharIndex(firstVisibleChar);
+
+        float scrollPercent = totalLines > visibleLines ? (float)firstVisibleLine / (totalLines - visibleLines) : 0;
+        int maxThumbTop = scrollbarPanel.Height - scrollbarThumb.Height;
+        scrollbarThumb.Top = (int)(scrollPercent * maxThumbTop);
+
+        RoundCorners(scrollbarThumb, 4);
     }
 
     private void UpdateLineNumbers()
