@@ -101,23 +101,29 @@ public class MainForm : Form
         var closeBtn = CreateWindowButton("✕", BgDark, Color.FromArgb(200, 50, 50));
         closeBtn.Location = new Point(this.ClientSize.Width - 46, 0);
         closeBtn.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-        closeBtn.Click += (s, e) => this.Close();
+        EventHandler closeHandler = (s, e) => this.Close();
+        closeBtn.Click += closeHandler;
+        foreach (Control c in closeBtn.Controls) c.Click += closeHandler;
         titleBar.Controls.Add(closeBtn);
 
         var maxBtn = CreateWindowButton("□", BgDark, BgLight);
         maxBtn.Location = new Point(this.ClientSize.Width - 92, 0);
         maxBtn.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-        maxBtn.Click += (s, e) => {
+        EventHandler maxHandler = (s, e) => {
             this.WindowState = this.WindowState == FormWindowState.Maximized
                 ? FormWindowState.Normal
                 : FormWindowState.Maximized;
         };
+        maxBtn.Click += maxHandler;
+        foreach (Control c in maxBtn.Controls) c.Click += maxHandler;
         titleBar.Controls.Add(maxBtn);
 
         var minBtn = CreateWindowButton("─", BgDark, BgLight);
         minBtn.Location = new Point(this.ClientSize.Width - 138, 0);
         minBtn.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-        minBtn.Click += (s, e) => this.WindowState = FormWindowState.Minimized;
+        EventHandler minHandler = (s, e) => this.WindowState = FormWindowState.Minimized;
+        minBtn.Click += minHandler;
+        foreach (Control c in minBtn.Controls) c.Click += minHandler;
         titleBar.Controls.Add(minBtn);
 
         // Drag functionality
@@ -134,7 +140,8 @@ public class MainForm : Form
         {
             Size = new Size(46, 40),
             BackColor = normalBg,
-            Cursor = Cursors.Hand
+            Cursor = Cursors.Hand,
+            Tag = text // Store text to identify button
         };
         var lbl = new Label
         {
@@ -150,8 +157,6 @@ public class MainForm : Form
         btn.MouseLeave += (s, e) => btn.BackColor = normalBg;
         lbl.MouseEnter += (s, e) => btn.BackColor = hoverBg;
         lbl.MouseLeave += (s, e) => btn.BackColor = normalBg;
-        // Label click will be handled by caller setting btn.Click
-        lbl.Click += (s, e) => btn.InvokeOnClick(btn, e);
         return btn;
     }
 
