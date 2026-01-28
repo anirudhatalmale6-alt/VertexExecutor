@@ -150,7 +150,8 @@ public class MainForm : Form
         btn.MouseLeave += (s, e) => btn.BackColor = normalBg;
         lbl.MouseEnter += (s, e) => btn.BackColor = hoverBg;
         lbl.MouseLeave += (s, e) => btn.BackColor = normalBg;
-        lbl.Click += (s, e) => btn.OnClick(e);
+        // Label click will be handled by caller setting btn.Click
+        lbl.Click += (s, e) => btn.InvokeOnClick(btn, e);
         return btn;
     }
 
