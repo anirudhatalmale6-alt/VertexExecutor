@@ -20,9 +20,23 @@ public class MainForm : Form
     private RichTextBox lineNumbers;
     private RichTextBox codeEditor;
 
+    // Tab management
+    private List<TabInfo> tabs = new List<TabInfo>();
+    private int tabCounter = 1;
+    private TabInfo? activeTab;
+
     // State
     private bool isDragging = false;
     private Point dragOffset;
+
+    private class TabInfo
+    {
+        public Panel TabPanel { get; set; } = null!;
+        public Label TabLabel { get; set; } = null!;
+        public Label CloseBtn { get; set; } = null!;
+        public string Content { get; set; } = "";
+        public string Title { get; set; } = "";
+    }
 
     public MainForm()
     {
@@ -31,6 +45,7 @@ public class MainForm : Form
         CreateTabBar();
         CreateEditorPanel();
         CreateToolbar();
+        CreateNewTab(); // Create first tab
     }
 
     private void InitializeForm()
@@ -71,7 +86,7 @@ public class MainForm : Form
         };
         titleBar.Controls.Add(logoPanel);
 
-        // Close button (X)
+        // Close button (X) - only this and minimize
         var closeBtn = CreateTitleBarButton("✕", this.ClientSize.Width - 46, 0, 46, 42);
         closeBtn.Click += (s, e) => this.Close();
         closeBtn.MouseEnter += (s, e) => closeBtn.BackColor = Color.FromArgb(200, 50, 50);
@@ -79,22 +94,11 @@ public class MainForm : Form
         closeBtn.Anchor = AnchorStyles.Top | AnchorStyles.Right;
         titleBar.Controls.Add(closeBtn);
 
-        // Maximize button
-        var maxBtn = CreateTitleBarButton("□", this.ClientSize.Width - 92, 0, 46, 42);
-        maxBtn.Click += (s, e) => ToggleMaximize();
-        maxBtn.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-        titleBar.Controls.Add(maxBtn);
-
-        // Minimize button
-        var minBtn = CreateTitleBarButton("─", this.ClientSize.Width - 138, 0, 46, 42);
+        // Minimize button - positioned next to close
+        var minBtn = CreateTitleBarButton("─", this.ClientSize.Width - 92, 0, 46, 42);
         minBtn.Click += (s, e) => this.WindowState = FormWindowState.Minimized;
         minBtn.Anchor = AnchorStyles.Top | AnchorStyles.Right;
         titleBar.Controls.Add(minBtn);
-
-        // Settings button
-        var settingsBtn = CreateTitleBarButton("⚙", this.ClientSize.Width - 184, 0, 46, 42);
-        settingsBtn.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-        titleBar.Controls.Add(settingsBtn);
 
         // Drag functionality
         titleBar.MouseDown += TitleBar_MouseDown;
@@ -136,14 +140,61 @@ public class MainForm : Form
         };
         tabBar.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
 
-        // Tab: circle + "New Tab 1" + X
-        var tab = new Panel
+        this.Controls.Add(tabBar);
+    }
+
+    private void CreateNewTab()
+    {
+        // Save current tab content
+        if (activeTab != null)
+        {
+            activeTab.Content = codeEditor.Text;
+        }
+
+        var tabInfo = new TabInfo
+        {
+            Title = $"New Tab {tabCounter++}"
+        };
+
+        // Set default content for new tab
+        tabInfo.Content = @"local passes, fails, undefined = 0, 0, 0
+local running = 0
+
+local function getGlobal(path)
+    local value = getfenv(0)
+
+    while value ~= nil and path ~= """" do
+        local name, nextValue = string.match(path, ""^([^.]+)%.?(.*)$"")
+        value = value[name]
+        path = nextValue
+    end
+
+    return value
+end
+
+local function test(name, aliases, callback)
+    running += 1
+
+    task.spawn(function()
+        if not callback then
+            print(""skip"" .. name)
+        elseif not getGlobal(name) then
+            fails += 1
+            warn(""fail"" .. name)
+        else
+            passes += 1
+        end
+    end)
+end";
+
+        // Tab panel
+        tabInfo.TabPanel = new Panel
         {
             Size = new Size(130, 28),
-            Location = new Point(12, 4),
-            BackColor = TabBg
+            BackColor = TabBg,
+            Cursor = Cursors.Hand
         };
-        RoundCorners(tab, 4);
+        RoundCorners(tabInfo.TabPanel, 4);
 
         // Orange/red circle
         var circle = new Panel
@@ -153,22 +204,23 @@ public class MainForm : Form
             BackColor = AccentRed
         };
         RoundCorners(circle, 6);
-        tab.Controls.Add(circle);
+        tabInfo.TabPanel.Controls.Add(circle);
 
         // Tab text
-        var tabText = new Label
+        tabInfo.TabLabel = new Label
         {
-            Text = "New Tab 1",
+            Text = tabInfo.Title,
             Location = new Point(26, 6),
             AutoSize = true,
             ForeColor = TextWhite,
             BackColor = Color.Transparent,
-            Font = new Font("Segoe UI", 9f)
+            Font = new Font("Segoe UI", 9f),
+            Cursor = Cursors.Hand
         };
-        tab.Controls.Add(tabText);
+        tabInfo.TabPanel.Controls.Add(tabInfo.TabLabel);
 
         // Close X
-        var tabClose = new Label
+        tabInfo.CloseBtn = new Label
         {
             Text = "×",
             Location = new Point(108, 4),
@@ -179,17 +231,81 @@ public class MainForm : Form
             TextAlign = ContentAlignment.MiddleCenter,
             Cursor = Cursors.Hand
         };
-        tabClose.MouseEnter += (s, e) => tabClose.ForeColor = TextWhite;
-        tabClose.MouseLeave += (s, e) => tabClose.ForeColor = TextGray;
-        tab.Controls.Add(tabClose);
+        tabInfo.CloseBtn.MouseEnter += (s, e) => tabInfo.CloseBtn.ForeColor = TextWhite;
+        tabInfo.CloseBtn.MouseLeave += (s, e) => tabInfo.CloseBtn.ForeColor = TextGray;
+        tabInfo.CloseBtn.Click += (s, e) => CloseTab(tabInfo);
+        tabInfo.TabPanel.Controls.Add(tabInfo.CloseBtn);
 
-        tabBar.Controls.Add(tab);
+        // Click to select tab
+        tabInfo.TabPanel.Click += (s, e) => SelectTab(tabInfo);
+        tabInfo.TabLabel.Click += (s, e) => SelectTab(tabInfo);
+        circle.Click += (s, e) => SelectTab(tabInfo);
 
-        // Plus button
+        tabs.Add(tabInfo);
+        RefreshTabBar();
+        SelectTab(tabInfo);
+    }
+
+    private void SelectTab(TabInfo tab)
+    {
+        // Save current content
+        if (activeTab != null)
+        {
+            activeTab.Content = codeEditor.Text;
+            activeTab.TabPanel.BackColor = Color.FromArgb(28, 28, 28);
+        }
+
+        activeTab = tab;
+        tab.TabPanel.BackColor = TabBg;
+
+        // Load tab content
+        codeEditor.Text = tab.Content;
+        HighlightSyntax();
+        UpdateLineNumbers();
+    }
+
+    private void CloseTab(TabInfo tab)
+    {
+        if (tabs.Count <= 1)
+        {
+            // Don't close last tab, just clear it
+            codeEditor.Clear();
+            return;
+        }
+
+        int index = tabs.IndexOf(tab);
+        tabs.Remove(tab);
+        tabBar.Controls.Remove(tab.TabPanel);
+
+        if (activeTab == tab)
+        {
+            // Select another tab
+            int newIndex = Math.Min(index, tabs.Count - 1);
+            SelectTab(tabs[newIndex]);
+        }
+
+        RefreshTabBar();
+    }
+
+    private void RefreshTabBar()
+    {
+        // Clear tab bar
+        tabBar.Controls.Clear();
+
+        // Add tabs
+        int x = 12;
+        foreach (var tab in tabs)
+        {
+            tab.TabPanel.Location = new Point(x, 4);
+            tabBar.Controls.Add(tab.TabPanel);
+            x += 135;
+        }
+
+        // Add plus button
         var plusBtn = new Label
         {
             Text = "+",
-            Location = new Point(150, 6),
+            Location = new Point(x + 5, 6),
             Size = new Size(24, 24),
             ForeColor = TextGray,
             BackColor = Color.Transparent,
@@ -199,9 +315,8 @@ public class MainForm : Form
         };
         plusBtn.MouseEnter += (s, e) => plusBtn.ForeColor = TextWhite;
         plusBtn.MouseLeave += (s, e) => plusBtn.ForeColor = TextGray;
+        plusBtn.Click += (s, e) => CreateNewTab();
         tabBar.Controls.Add(plusBtn);
-
-        this.Controls.Add(tabBar);
     }
 
     private void CreateEditorPanel()
@@ -251,40 +366,7 @@ public class MainForm : Form
         codeEditor.TextChanged += CodeEditor_TextChanged;
         codeEditor.VScroll += CodeEditor_VScroll;
 
-        // Sample code like in reference
-        codeEditor.Text = @"local passes, fails, undefined = 0, 0, 0
-local running = 0
-
-local function getGlobal(path)
-    local value = getfenv(0)
-
-    while value ~= nil and path ~= """" do
-        local name, nextValue = string.match(path, ""^([^.]+)%.?(.*)$"")
-        value = value[name]
-        path = nextValue
-    end
-
-    return value
-end
-
-local function test(name, aliases, callback)
-    running += 1
-
-    task.spawn(function()
-        if not callback then
-            print(""skip"" .. name)
-        elseif not getGlobal(name) then
-            fails += 1
-            warn(""fail"" .. name)
-        else
-            passes += 1
-        end
-    end)
-end";
-
-        HighlightSyntax();
         editorPanel.Controls.Add(codeEditor);
-
         this.Controls.Add(editorPanel);
     }
 
@@ -411,14 +493,6 @@ end";
         path.AddArc(rect.X, rect.Bottom - d, d, d, 90, 90);
         path.CloseFigure();
         ctrl.Region = new Region(path);
-    }
-
-    private void ToggleMaximize()
-    {
-        if (this.WindowState == FormWindowState.Maximized)
-            this.WindowState = FormWindowState.Normal;
-        else
-            this.WindowState = FormWindowState.Maximized;
     }
 
     #region Title Bar Dragging
