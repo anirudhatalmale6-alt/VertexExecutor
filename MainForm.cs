@@ -19,6 +19,7 @@ public class MainForm : Form
     private Panel toolbarPanel;
     private RichTextBox lineNumbers;
     private RichTextBox codeEditor;
+    private Panel minimapPanel;
 
     // Tab management
     private List<TabInfo> tabs = new List<TabInfo>();
@@ -262,6 +263,7 @@ end";
         codeEditor.Text = tab.Content;
         HighlightSyntax();
         UpdateLineNumbers();
+        minimapPanel?.Invalidate(); // Refresh minimap
     }
 
     private void CloseTab(TabInfo tab)
@@ -367,7 +369,86 @@ end";
         codeEditor.VScroll += CodeEditor_VScroll;
 
         editorPanel.Controls.Add(codeEditor);
+
+        // Minimap panel (code preview on the right)
+        minimapPanel = new Panel
+        {
+            Size = new Size(120, editorPanel.Height),
+            Location = new Point(editorPanel.Width - 120, 0),
+            BackColor = Color.FromArgb(25, 25, 25)
+        };
+        minimapPanel.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Right;
+        minimapPanel.Paint += MinimapPanel_Paint;
+        editorPanel.Controls.Add(minimapPanel);
+        minimapPanel.BringToFront();
+
+        // Adjust code editor width to make room for minimap
+        codeEditor.Size = new Size(editorPanel.Width - 55 - 120, editorPanel.Height);
+
         this.Controls.Add(editorPanel);
+    }
+
+    private void MinimapPanel_Paint(object? sender, PaintEventArgs e)
+    {
+        if (codeEditor == null || string.IsNullOrEmpty(codeEditor.Text)) return;
+
+        var g = e.Graphics;
+        g.Clear(Color.FromArgb(25, 25, 25));
+
+        string[] lines = codeEditor.Text.Split('\n');
+        float lineHeight = 2.5f; // Very small line height for minimap
+        float charWidth = 0.8f;  // Very small char width
+        float y = 5;
+        float maxWidth = minimapPanel.Width - 10;
+
+        // Keywords for highlighting
+        var keywords = new HashSet<string> { "local", "function", "end", "if", "then", "else", "elseif",
+                                              "while", "do", "for", "in", "return", "not", "and", "or", "nil", "true", "false" };
+
+        using var whiteBrush = new SolidBrush(Color.FromArgb(150, 150, 150));
+        using var redBrush = new SolidBrush(Color.FromArgb(200, 80, 70));
+
+        foreach (var line in lines)
+        {
+            if (y > minimapPanel.Height - 5) break;
+
+            float x = 5;
+
+            // Simple rendering - draw small rectangles for each word
+            string[] words = line.Split(new[] { ' ', '\t', '(', ')', ',', '.', '=', '+', '-', '*', '/', '[', ']', '{', '}', '"', '\'' }, StringSplitOptions.RemoveEmptyEntries);
+
+            foreach (var word in words)
+            {
+                if (x > maxWidth) break;
+
+                float wordWidth = word.Length * charWidth;
+                var brush = keywords.Contains(word) ? redBrush : whiteBrush;
+
+                g.FillRectangle(brush, x, y, Math.Min(wordWidth, maxWidth - x), lineHeight);
+                x += wordWidth + charWidth * 2;
+            }
+
+            y += lineHeight + 1;
+        }
+
+        // Draw viewport indicator (rectangle showing visible area)
+        if (codeEditor.Lines.Length > 0)
+        {
+            int firstVisibleChar = codeEditor.GetCharIndexFromPosition(new Point(0, 0));
+            int firstVisibleLine = codeEditor.GetLineFromCharIndex(firstVisibleChar);
+
+            int visibleLines = codeEditor.Height / codeEditor.Font.Height;
+            int totalLines = codeEditor.Lines.Length;
+
+            if (totalLines > 0)
+            {
+                float viewportY = 5 + (firstVisibleLine * (lineHeight + 1));
+                float viewportHeight = visibleLines * (lineHeight + 1);
+
+                using var viewportBrush = new SolidBrush(Color.FromArgb(40, 255, 255, 255));
+                g.FillRectangle(viewportBrush, 0, viewportY, minimapPanel.Width, viewportHeight);
+            }
+        }
     }
 
     private void CreateToolbar()
@@ -524,6 +605,7 @@ end";
     private void CodeEditor_TextChanged(object? sender, EventArgs e)
     {
         UpdateLineNumbers();
+        minimapPanel?.Invalidate(); // Refresh minimap
     }
 
     private void CodeEditor_VScroll(object? sender, EventArgs e)
@@ -540,6 +622,8 @@ end";
                 lineNumbers.ScrollToCaret();
             }
         }
+
+        minimapPanel?.Invalidate(); // Refresh minimap viewport indicator
     }
 
     private void UpdateLineNumbers()
