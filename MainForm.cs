@@ -22,6 +22,7 @@ public class MainForm : Form
     private Panel minimapPanel;
     private Panel scrollbarPanel;
     private Panel scrollbarThumb;
+    private Panel indentGuidesPanel;
 
     // Tab management
     private List<TabInfo> tabs = new List<TabInfo>();
@@ -376,12 +377,13 @@ public class MainForm : Form
         lineNumbers.DeselectAll();
         editorPanel.Controls.Add(lineNumbers);
 
-        // Custom scrollbar on the right (dark/black style)
+        // Custom scrollbar on the right (dark/black style) - hidden by default
         scrollbarPanel = new Panel
         {
             Size = new Size(12, editorPanel.Height),
             Location = new Point(editorPanel.Width - 112, 0), // Left of minimap
-            BackColor = Color.FromArgb(20, 20, 20)
+            BackColor = Color.FromArgb(20, 20, 20),
+            Visible = false // Only show when content overflows
         };
         scrollbarPanel.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Right;
 
@@ -431,11 +433,11 @@ public class MainForm : Form
         scrollbarPanel.Controls.Add(scrollbarThumb);
         editorPanel.Controls.Add(scrollbarPanel);
 
-        // Code editor (between line numbers and scrollbar)
+        // Code editor (between line numbers and minimap - scrollbar only shows when needed)
         codeEditor = new RichTextBox
         {
             Location = new Point(55, 0),
-            Size = new Size(editorPanel.Width - 55 - 112, editorPanel.Height), // Leave space for scrollbar + minimap
+            Size = new Size(editorPanel.Width - 55 - 100, editorPanel.Height), // Full width to minimap when scrollbar hidden
             BackColor = BgEditor,
             ForeColor = TextWhite,
             Font = new Font("Consolas", 11f),
@@ -447,9 +449,25 @@ public class MainForm : Form
         codeEditor.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
         codeEditor.TextChanged += CodeEditor_TextChanged;
         codeEditor.VScroll += CodeEditor_VScroll;
+
+        // Indent guides overlay panel (transparent, draws lines over editor)
+        indentGuidesPanel = new Panel
+        {
+            Location = codeEditor.Location,
+            Size = codeEditor.Size,
+            BackColor = Color.Transparent
+        };
+        indentGuidesPanel.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
+        indentGuidesPanel.Paint += IndentGuidesPanel_Paint;
+        indentGuidesPanel.MouseDown += (s, e) => { codeEditor.Focus(); };
+        indentGuidesPanel.MouseWheel += (s, e) => { codeEditor.Focus(); CodeEditor_MouseWheel(s, e); };
         codeEditor.MouseWheel += CodeEditor_MouseWheel;
 
         editorPanel.Controls.Add(codeEditor);
+        editorPanel.Controls.Add(indentGuidesPanel);
+        indentGuidesPanel.BringToFront();
+        // Make indent guides transparent to mouse clicks (pass through to editor)
+        indentGuidesPanel.Enabled = false;
 
         this.Controls.Add(editorPanel);
     }
@@ -457,6 +475,53 @@ public class MainForm : Form
     private void CodeEditor_MouseWheel(object? sender, MouseEventArgs e)
     {
         UpdateScrollbarThumb();
+        indentGuidesPanel?.Invalidate();
+    }
+
+    private void IndentGuidesPanel_Paint(object? sender, PaintEventArgs e)
+    {
+        if (codeEditor == null || codeEditor.Lines.Length == 0) return;
+
+        var g = e.Graphics;
+        int lineHeight = codeEditor.Font.Height;
+        int tabWidth = 4; // 4 spaces per tab
+        float charWidth = g.MeasureString("M", codeEditor.Font).Width * 0.55f; // Approximate char width
+
+        // Get scroll position
+        int firstVisibleChar = codeEditor.GetCharIndexFromPosition(new Point(0, 0));
+        int firstVisibleLine = codeEditor.GetLineFromCharIndex(firstVisibleChar);
+
+        using var pen = new Pen(Color.FromArgb(50, 50, 50), 1);
+        pen.DashStyle = DashStyle.Solid;
+
+        int visibleLines = codeEditor.Height / lineHeight + 2;
+
+        for (int i = 0; i < visibleLines && (firstVisibleLine + i) < codeEditor.Lines.Length; i++)
+        {
+            int lineIndex = firstVisibleLine + i;
+            if (lineIndex < 0 || lineIndex >= codeEditor.Lines.Length) continue;
+
+            string line = codeEditor.Lines[lineIndex];
+            int indent = 0;
+
+            // Count leading spaces/tabs
+            foreach (char c in line)
+            {
+                if (c == ' ') indent++;
+                else if (c == '\t') indent += tabWidth;
+                else break;
+            }
+
+            // Draw vertical lines for each indent level
+            int indentLevels = indent / tabWidth;
+            int y = i * lineHeight;
+
+            for (int level = 1; level <= indentLevels; level++)
+            {
+                float x = (level * tabWidth * charWidth) - charWidth;
+                g.DrawLine(pen, x, y, x, y + lineHeight);
+            }
+        }
     }
 
     private void MinimapPanel_Paint(object? sender, PaintEventArgs e)
@@ -733,7 +798,9 @@ public class MainForm : Form
     {
         UpdateLineNumbers();
         HighlightSyntax(); // Real-time syntax highlighting
+        UpdateScrollbarThumb(); // Check if scrollbar needs to appear/disappear
         minimapPanel?.Invalidate();
+        indentGuidesPanel?.Invalidate();
     }
 
     private void CodeEditor_VScroll(object? sender, EventArgs e)
@@ -753,15 +820,26 @@ public class MainForm : Form
 
         UpdateScrollbarThumb();
         minimapPanel?.Invalidate();
+        indentGuidesPanel?.Invalidate();
     }
 
     private void UpdateScrollbarThumb()
     {
         if (scrollbarThumb == null || scrollbarPanel == null || codeEditor == null) return;
-        if (isScrollbarDragging) return; // Don't update while user is dragging
 
         int totalLines = Math.Max(1, codeEditor.Lines.Length);
         int visibleLines = Math.Max(1, codeEditor.Height / codeEditor.Font.Height);
+
+        // Show/hide scrollbar based on content length
+        bool needsScrollbar = totalLines > visibleLines;
+        if (scrollbarPanel.Visible != needsScrollbar)
+        {
+            scrollbarPanel.Visible = needsScrollbar;
+            // Resize editor when scrollbar visibility changes
+            codeEditor.Width = editorPanel.Width - 55 - 100 - (needsScrollbar ? 12 : 0);
+        }
+
+        if (!needsScrollbar || isScrollbarDragging) return;
 
         // Calculate thumb size based on visible vs total content
         int minThumbHeight = 30;
