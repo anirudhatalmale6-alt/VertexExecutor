@@ -29,6 +29,7 @@ public class MainForm : Form
     // State
     private bool isDragging = false;
     private Point dragOffset;
+    private bool isHighlighting = false;
 
     private class TabInfo
     {
@@ -87,7 +88,7 @@ public class MainForm : Form
         };
         titleBar.Controls.Add(logoPanel);
 
-        // Close button (X) - only this and minimize
+        // Close button (X)
         var closeBtn = CreateTitleBarButton("✕", this.ClientSize.Width - 46, 0, 46, 42);
         closeBtn.Click += (s, e) => this.Close();
         closeBtn.MouseEnter += (s, e) => closeBtn.BackColor = Color.FromArgb(200, 50, 50);
@@ -95,11 +96,36 @@ public class MainForm : Form
         closeBtn.Anchor = AnchorStyles.Top | AnchorStyles.Right;
         titleBar.Controls.Add(closeBtn);
 
-        // Minimize button - positioned next to close
+        // Minimize button
         var minBtn = CreateTitleBarButton("─", this.ClientSize.Width - 92, 0, 46, 42);
         minBtn.Click += (s, e) => this.WindowState = FormWindowState.Minimized;
         minBtn.Anchor = AnchorStyles.Top | AnchorStyles.Right;
         titleBar.Controls.Add(minBtn);
+
+        // Discord button (logo)
+        var discordBtn = new Panel
+        {
+            Size = new Size(46, 42),
+            Location = new Point(this.ClientSize.Width - 138, 0),
+            BackColor = Color.Transparent,
+            Cursor = Cursors.Hand
+        };
+        discordBtn.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+        discordBtn.Paint += (s, e) =>
+        {
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            // Draw Discord logo (simplified)
+            using var brush = new SolidBrush(TextGray);
+            // Draw a simple Discord-like icon
+            var rect = new Rectangle(13, 12, 20, 16);
+            e.Graphics.FillEllipse(brush, 15, 14, 6, 6);
+            e.Graphics.FillEllipse(brush, 25, 14, 6, 6);
+            using var pen = new Pen(TextGray, 2);
+            e.Graphics.DrawArc(pen, 13, 10, 20, 20, 200, 140);
+        };
+        discordBtn.MouseEnter += (s, e) => discordBtn.BackColor = Color.FromArgb(50, 50, 50);
+        discordBtn.MouseLeave += (s, e) => discordBtn.BackColor = Color.Transparent;
+        titleBar.Controls.Add(discordBtn);
 
         // Drag functionality
         titleBar.MouseDown += TitleBar_MouseDown;
@@ -157,36 +183,8 @@ public class MainForm : Form
             Title = $"New Tab {tabCounter++}"
         };
 
-        // Set default content for new tab
-        tabInfo.Content = @"local passes, fails, undefined = 0, 0, 0
-local running = 0
-
-local function getGlobal(path)
-    local value = getfenv(0)
-
-    while value ~= nil and path ~= """" do
-        local name, nextValue = string.match(path, ""^([^.]+)%.?(.*)$"")
-        value = value[name]
-        path = nextValue
-    end
-
-    return value
-end
-
-local function test(name, aliases, callback)
-    running += 1
-
-    task.spawn(function()
-        if not callback then
-            print(""skip"" .. name)
-        elseif not getGlobal(name) then
-            fails += 1
-            warn(""fail"" .. name)
-        else
-            passes += 1
-        end
-    end)
-end";
+        // Set default content - simple Hello World
+        tabInfo.Content = "print(\"Hello World\")";
 
         // Tab panel
         tabInfo.TabPanel = new Panel
@@ -331,6 +329,17 @@ end";
         };
         editorPanel.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
 
+        // Minimap panel on the RIGHT side
+        minimapPanel = new Panel
+        {
+            Size = new Size(100, editorPanel.Height),
+            Location = new Point(editorPanel.Width - 100, 0),
+            BackColor = Color.FromArgb(25, 25, 25)
+        };
+        minimapPanel.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Right;
+        minimapPanel.Paint += MinimapPanel_Paint;
+        editorPanel.Controls.Add(minimapPanel);
+
         // Line numbers
         lineNumbers = new RichTextBox
         {
@@ -351,11 +360,11 @@ end";
         lineNumbers.DeselectAll();
         editorPanel.Controls.Add(lineNumbers);
 
-        // Code editor
+        // Code editor (between line numbers and minimap)
         codeEditor = new RichTextBox
         {
             Location = new Point(55, 0),
-            Size = new Size(editorPanel.Width - 55, editorPanel.Height),
+            Size = new Size(editorPanel.Width - 55 - 100, editorPanel.Height),
             BackColor = BgEditor,
             ForeColor = TextWhite,
             Font = new Font("Consolas", 11f),
@@ -370,21 +379,6 @@ end";
 
         editorPanel.Controls.Add(codeEditor);
 
-        // Minimap panel (code preview on the right)
-        minimapPanel = new Panel
-        {
-            Size = new Size(120, editorPanel.Height),
-            Location = new Point(editorPanel.Width - 120, 0),
-            BackColor = Color.FromArgb(25, 25, 25)
-        };
-        minimapPanel.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Right;
-        minimapPanel.Paint += MinimapPanel_Paint;
-        editorPanel.Controls.Add(minimapPanel);
-        minimapPanel.BringToFront();
-
-        // Adjust code editor width to make room for minimap
-        codeEditor.Size = new Size(editorPanel.Width - 55 - 120, editorPanel.Height);
-
         this.Controls.Add(editorPanel);
     }
 
@@ -396,14 +390,13 @@ end";
         g.Clear(Color.FromArgb(25, 25, 25));
 
         string[] lines = codeEditor.Text.Split('\n');
-        float lineHeight = 2.5f; // Very small line height for minimap
-        float charWidth = 0.8f;  // Very small char width
+        float lineHeight = 2.5f;
+        float charWidth = 0.8f;
         float y = 5;
         float maxWidth = minimapPanel.Width - 10;
 
-        // Keywords for highlighting
         var keywords = new HashSet<string> { "local", "function", "end", "if", "then", "else", "elseif",
-                                              "while", "do", "for", "in", "return", "not", "and", "or", "nil", "true", "false" };
+                                              "while", "do", "for", "in", "return", "not", "and", "or", "nil", "true", "false", "print" };
 
         using var whiteBrush = new SolidBrush(Color.FromArgb(150, 150, 150));
         using var redBrush = new SolidBrush(Color.FromArgb(200, 80, 70));
@@ -413,8 +406,6 @@ end";
             if (y > minimapPanel.Height - 5) break;
 
             float x = 5;
-
-            // Simple rendering - draw small rectangles for each word
             string[] words = line.Split(new[] { ' ', '\t', '(', ')', ',', '.', '=', '+', '-', '*', '/', '[', ']', '{', '}', '"', '\'' }, StringSplitOptions.RemoveEmptyEntries);
 
             foreach (var word in words)
@@ -431,7 +422,6 @@ end";
             y += lineHeight + 1;
         }
 
-        // Draw viewport indicator (rectangle showing visible area)
         if (codeEditor.Lines.Length > 0)
         {
             int firstVisibleChar = codeEditor.GetCharIndexFromPosition(new Point(0, 0));
@@ -461,7 +451,6 @@ end";
         };
         toolbarPanel.Anchor = AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
 
-        // Create buttons
         var buttons = new[] {
             ("▷", "Execute"),
             ("🗑", "Clear"),
@@ -532,11 +521,16 @@ end";
 
     private void HighlightSyntax()
     {
+        if (isHighlighting) return;
+        isHighlighting = true;
+
         var keywords = new[] { "local", "function", "end", "if", "then", "else", "elseif",
-                               "while", "do", "for", "in", "return", "not", "and", "or", "nil", "true", "false" };
+                               "while", "do", "for", "in", "return", "not", "and", "or", "nil", "true", "false", "print" };
 
         int selStart = codeEditor.SelectionStart;
         int selLen = codeEditor.SelectionLength;
+
+        codeEditor.SuspendLayout();
 
         codeEditor.SelectAll();
         codeEditor.SelectionColor = TextWhite;
@@ -561,6 +555,9 @@ end";
 
         codeEditor.SelectionStart = selStart;
         codeEditor.SelectionLength = selLen;
+
+        codeEditor.ResumeLayout();
+        isHighlighting = false;
     }
 
     private void RoundCorners(Control ctrl, int radius)
@@ -605,7 +602,8 @@ end";
     private void CodeEditor_TextChanged(object? sender, EventArgs e)
     {
         UpdateLineNumbers();
-        minimapPanel?.Invalidate(); // Refresh minimap
+        HighlightSyntax(); // Real-time syntax highlighting
+        minimapPanel?.Invalidate();
     }
 
     private void CodeEditor_VScroll(object? sender, EventArgs e)
@@ -623,7 +621,7 @@ end";
             }
         }
 
-        minimapPanel?.Invalidate(); // Refresh minimap viewport indicator
+        minimapPanel?.Invalidate();
     }
 
     private void UpdateLineNumbers()
