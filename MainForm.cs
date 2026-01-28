@@ -114,14 +114,26 @@ public class MainForm : Form
         discordBtn.Paint += (s, e) =>
         {
             e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-            // Draw Discord logo (simplified)
-            using var brush = new SolidBrush(TextGray);
-            // Draw a simple Discord-like icon
-            var rect = new Rectangle(13, 12, 20, 16);
-            e.Graphics.FillEllipse(brush, 15, 14, 6, 6);
-            e.Graphics.FillEllipse(brush, 25, 14, 6, 6);
-            using var pen = new Pen(TextGray, 2);
-            e.Graphics.DrawArc(pen, 13, 10, 20, 20, 200, 140);
+            // Draw Discord logo - game controller style icon
+            using var brush = new SolidBrush(Color.FromArgb(114, 137, 218)); // Discord blurple color
+
+            // Main body (rounded rectangle shape)
+            var bodyPath = new GraphicsPath();
+            bodyPath.AddArc(10, 12, 8, 8, 180, 90);   // top left
+            bodyPath.AddArc(28, 12, 8, 8, 270, 90);   // top right
+            bodyPath.AddArc(28, 22, 8, 8, 0, 90);     // bottom right
+            bodyPath.AddArc(10, 22, 8, 8, 90, 90);    // bottom left
+            bodyPath.CloseFigure();
+            e.Graphics.FillPath(brush, bodyPath);
+
+            // Eyes (white circles)
+            using var whiteBrush = new SolidBrush(Color.FromArgb(35, 35, 35));
+            e.Graphics.FillEllipse(whiteBrush, 15, 18, 5, 6);
+            e.Graphics.FillEllipse(whiteBrush, 26, 18, 5, 6);
+
+            // Ears/antennas
+            e.Graphics.FillRectangle(brush, 12, 8, 4, 6);
+            e.Graphics.FillRectangle(brush, 30, 8, 4, 6);
         };
         discordBtn.MouseEnter += (s, e) => discordBtn.BackColor = Color.FromArgb(50, 50, 50);
         discordBtn.MouseLeave += (s, e) => discordBtn.BackColor = Color.Transparent;
@@ -388,40 +400,93 @@ public class MainForm : Form
 
         var g = e.Graphics;
         g.Clear(Color.FromArgb(25, 25, 25));
+        g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
 
         string[] lines = codeEditor.Text.Split('\n');
-        float lineHeight = 2.5f;
-        float charWidth = 0.8f;
+        float fontSize = 3f; // Very small font for minimap
+        float lineHeight = 4.5f;
         float y = 5;
-        float maxWidth = minimapPanel.Width - 10;
 
         var keywords = new HashSet<string> { "local", "function", "end", "if", "then", "else", "elseif",
                                               "while", "do", "for", "in", "return", "not", "and", "or", "nil", "true", "false", "print" };
 
-        using var whiteBrush = new SolidBrush(Color.FromArgb(150, 150, 150));
-        using var redBrush = new SolidBrush(Color.FromArgb(200, 80, 70));
+        using var miniFont = new Font("Consolas", fontSize, FontStyle.Regular);
+        using var whiteBrush = new SolidBrush(Color.FromArgb(160, 160, 160));
+        using var redBrush = new SolidBrush(Color.FromArgb(220, 90, 80));
+        using var stringBrush = new SolidBrush(Color.FromArgb(100, 180, 100));
+        using var commentBrush = new SolidBrush(Color.FromArgb(100, 100, 100));
 
         foreach (var line in lines)
         {
             if (y > minimapPanel.Height - 5) break;
 
-            float x = 5;
-            string[] words = line.Split(new[] { ' ', '\t', '(', ')', ',', '.', '=', '+', '-', '*', '/', '[', ']', '{', '}', '"', '\'' }, StringSplitOptions.RemoveEmptyEntries);
+            // Draw each line with syntax highlighting
+            float x = 3;
+            string remaining = line;
 
-            foreach (var word in words)
+            // Check if line is a comment
+            if (remaining.TrimStart().StartsWith("--"))
             {
-                if (x > maxWidth) break;
+                g.DrawString(remaining, miniFont, commentBrush, x, y);
+            }
+            else
+            {
+                // Parse and draw tokens with colors
+                string currentLine = remaining;
+                int pos = 0;
 
-                float wordWidth = word.Length * charWidth;
-                var brush = keywords.Contains(word) ? redBrush : whiteBrush;
+                while (pos < currentLine.Length)
+                {
+                    // Skip whitespace
+                    if (char.IsWhiteSpace(currentLine[pos]))
+                    {
+                        pos++;
+                        x += fontSize * 0.6f;
+                        continue;
+                    }
 
-                g.FillRectangle(brush, x, y, Math.Min(wordWidth, maxWidth - x), lineHeight);
-                x += wordWidth + charWidth * 2;
+                    // Check for string
+                    if (currentLine[pos] == '"' || currentLine[pos] == '\'')
+                    {
+                        char quote = currentLine[pos];
+                        int endPos = pos + 1;
+                        while (endPos < currentLine.Length && currentLine[endPos] != quote)
+                            endPos++;
+                        if (endPos < currentLine.Length) endPos++; // include closing quote
+
+                        string str = currentLine.Substring(pos, endPos - pos);
+                        g.DrawString(str, miniFont, stringBrush, x, y);
+                        x += str.Length * fontSize * 0.6f;
+                        pos = endPos;
+                        continue;
+                    }
+
+                    // Check for word (identifier or keyword)
+                    if (char.IsLetterOrDigit(currentLine[pos]) || currentLine[pos] == '_')
+                    {
+                        int endPos = pos;
+                        while (endPos < currentLine.Length && (char.IsLetterOrDigit(currentLine[endPos]) || currentLine[endPos] == '_'))
+                            endPos++;
+
+                        string word = currentLine.Substring(pos, endPos - pos);
+                        var brush = keywords.Contains(word) ? redBrush : whiteBrush;
+                        g.DrawString(word, miniFont, brush, x, y);
+                        x += word.Length * fontSize * 0.6f;
+                        pos = endPos;
+                        continue;
+                    }
+
+                    // Other characters (operators, etc)
+                    g.DrawString(currentLine[pos].ToString(), miniFont, whiteBrush, x, y);
+                    x += fontSize * 0.6f;
+                    pos++;
+                }
             }
 
-            y += lineHeight + 1;
+            y += lineHeight;
         }
 
+        // Draw viewport indicator
         if (codeEditor.Lines.Length > 0)
         {
             int firstVisibleChar = codeEditor.GetCharIndexFromPosition(new Point(0, 0));
@@ -432,10 +497,10 @@ public class MainForm : Form
 
             if (totalLines > 0)
             {
-                float viewportY = 5 + (firstVisibleLine * (lineHeight + 1));
-                float viewportHeight = visibleLines * (lineHeight + 1);
+                float viewportY = 5 + (firstVisibleLine * lineHeight);
+                float viewportHeight = visibleLines * lineHeight;
 
-                using var viewportBrush = new SolidBrush(Color.FromArgb(40, 255, 255, 255));
+                using var viewportBrush = new SolidBrush(Color.FromArgb(30, 255, 255, 255));
                 g.FillRectangle(viewportBrush, 0, viewportY, minimapPanel.Width, viewportHeight);
             }
         }
