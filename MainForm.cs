@@ -4,57 +4,63 @@ namespace VertexExecutor;
 
 public class MainForm : Form
 {
-    // Colors from reference
-    private static readonly Color BgDark = Color.FromArgb(22, 22, 22);
-    private static readonly Color BgEditor = Color.FromArgb(30, 30, 30);
-    private static readonly Color TextWhite = Color.FromArgb(210, 210, 210);
-    private static readonly Color TextGray = Color.FromArgb(90, 90, 90);
-    private static readonly Color AccentRed = Color.FromArgb(230, 90, 80);
-    private static readonly Color TabBg = Color.FromArgb(38, 38, 38);
+    // Colors
+    private static readonly Color BgDark = Color.FromArgb(18, 18, 18);
+    private static readonly Color BgMedium = Color.FromArgb(28, 28, 28);
+    private static readonly Color BgLight = Color.FromArgb(38, 38, 38);
+    private static readonly Color TextWhite = Color.FromArgb(220, 220, 220);
+    private static readonly Color TextGray = Color.FromArgb(120, 120, 120);
+    private static readonly Color AccentGold = Color.FromArgb(212, 175, 55);
+    private static readonly Color AccentRed = Color.FromArgb(200, 80, 80);
 
     // Controls
     private Panel titleBar;
-    private Panel tabBar;
+    private Panel navBar;
+    private Panel fileTabBar;
+    private Panel toolbar;
     private Panel editorPanel;
-    private Panel toolbarPanel;
+    private Panel consolePanel;
     private RichTextBox lineNumbers;
     private RichTextBox codeEditor;
-    private Panel minimapPanel;
-    private Panel indentGuidesPanel;
+    private Label consoleLabel;
+    private bool consoleExpanded = false;
 
     // Tab management
-    private List<TabInfo> tabs = new List<TabInfo>();
-    private int tabCounter = 1;
-    private TabInfo? activeTab;
+    private List<FileTab> fileTabs = new List<FileTab>();
+    private int fileCounter = 1;
+    private FileTab? activeFileTab;
 
     // State
     private bool isDragging = false;
     private Point dragOffset;
     private bool isHighlighting = false;
+    private string selectedNav = "Editor";
 
-    private class TabInfo
+    private class FileTab
     {
         public Panel TabPanel { get; set; } = null!;
-        public Label TabLabel { get; set; } = null!;
+        public Label NameLabel { get; set; } = null!;
         public Label CloseBtn { get; set; } = null!;
         public string Content { get; set; } = "";
-        public string Title { get; set; } = "";
+        public string FileName { get; set; } = "";
     }
 
     public MainForm()
     {
         InitializeForm();
         CreateTitleBar();
-        CreateTabBar();
-        CreateEditorPanel();
+        CreateNavBar();
+        CreateFileTabBar();
         CreateToolbar();
-        CreateNewTab(); // Create first tab
+        CreateEditorPanel();
+        CreateConsolePanel();
+        CreateNewFileTab();
     }
 
     private void InitializeForm()
     {
         this.Text = "Vertex";
-        this.Size = new Size(900, 650);
+        this.Size = new Size(800, 550);
         this.MinimumSize = new Size(600, 400);
         this.FormBorderStyle = FormBorderStyle.None;
         this.StartPosition = FormStartPosition.CenterScreen;
@@ -66,608 +72,529 @@ public class MainForm : Form
     {
         titleBar = new Panel
         {
-            Size = new Size(this.ClientSize.Width, 42),
-            Location = new Point(0, 0),
+            Dock = DockStyle.Top,
+            Height = 40,
             BackColor = BgDark
         };
-        titleBar.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
 
-        // Logo V (red lines forming V shape)
+        // V Logo (gold colored)
         var logoPanel = new Panel
         {
-            Size = new Size(32, 32),
-            Location = new Point(12, 5),
+            Size = new Size(36, 36),
+            Location = new Point(8, 2),
             BackColor = Color.Transparent
         };
         logoPanel.Paint += (s, e) =>
         {
             e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-            using var pen = new Pen(AccentRed, 2.5f);
+            using var pen = new Pen(AccentGold, 3f);
             // Draw V shape
-            e.Graphics.DrawLine(pen, 4, 6, 16, 26);
-            e.Graphics.DrawLine(pen, 28, 6, 16, 26);
+            e.Graphics.DrawLine(pen, 6, 8, 18, 28);
+            e.Graphics.DrawLine(pen, 30, 8, 18, 28);
         };
+        logoPanel.MouseDown += TitleBar_MouseDown;
+        logoPanel.MouseMove += TitleBar_MouseMove;
+        logoPanel.MouseUp += TitleBar_MouseUp;
         titleBar.Controls.Add(logoPanel);
 
-        // Close button (X)
-        var closeBtn = CreateTitleBarButton("✕", this.ClientSize.Width - 46, 0, 46, 42);
-        closeBtn.Click += (s, e) => this.Close();
-        closeBtn.MouseEnter += (s, e) => closeBtn.BackColor = Color.FromArgb(200, 50, 50);
-        closeBtn.MouseLeave += (s, e) => closeBtn.BackColor = Color.Transparent;
+        // Window buttons (right side)
+        var closeBtn = CreateWindowButton("✕", BgDark, Color.FromArgb(200, 50, 50));
+        closeBtn.Location = new Point(this.ClientSize.Width - 46, 0);
         closeBtn.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+        closeBtn.Click += (s, e) => this.Close();
         titleBar.Controls.Add(closeBtn);
 
-        // Minimize button
-        var minBtn = CreateTitleBarButton("─", this.ClientSize.Width - 92, 0, 46, 42);
-        minBtn.Click += (s, e) => this.WindowState = FormWindowState.Minimized;
+        var maxBtn = CreateWindowButton("□", BgDark, BgLight);
+        maxBtn.Location = new Point(this.ClientSize.Width - 92, 0);
+        maxBtn.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+        maxBtn.Click += (s, e) => {
+            this.WindowState = this.WindowState == FormWindowState.Maximized
+                ? FormWindowState.Normal
+                : FormWindowState.Maximized;
+        };
+        titleBar.Controls.Add(maxBtn);
+
+        var minBtn = CreateWindowButton("─", BgDark, BgLight);
+        minBtn.Location = new Point(this.ClientSize.Width - 138, 0);
         minBtn.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+        minBtn.Click += (s, e) => this.WindowState = FormWindowState.Minimized;
         titleBar.Controls.Add(minBtn);
-
-        // Discord button (logo)
-        var discordBtn = new Panel
-        {
-            Size = new Size(46, 42),
-            Location = new Point(this.ClientSize.Width - 138, 0),
-            BackColor = Color.Transparent,
-            Cursor = Cursors.Hand
-        };
-        discordBtn.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-        discordBtn.Paint += (s, e) =>
-        {
-            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-            // Draw Discord logo - game controller style icon
-            using var brush = new SolidBrush(Color.FromArgb(114, 137, 218)); // Discord blurple color
-
-            // Main body (rounded rectangle shape)
-            var bodyPath = new GraphicsPath();
-            bodyPath.AddArc(10, 12, 8, 8, 180, 90);   // top left
-            bodyPath.AddArc(28, 12, 8, 8, 270, 90);   // top right
-            bodyPath.AddArc(28, 22, 8, 8, 0, 90);     // bottom right
-            bodyPath.AddArc(10, 22, 8, 8, 90, 90);    // bottom left
-            bodyPath.CloseFigure();
-            e.Graphics.FillPath(brush, bodyPath);
-
-            // Eyes (white circles)
-            using var whiteBrush = new SolidBrush(Color.FromArgb(35, 35, 35));
-            e.Graphics.FillEllipse(whiteBrush, 15, 18, 5, 6);
-            e.Graphics.FillEllipse(whiteBrush, 26, 18, 5, 6);
-
-            // Ears/antennas
-            e.Graphics.FillRectangle(brush, 12, 8, 4, 6);
-            e.Graphics.FillRectangle(brush, 30, 8, 4, 6);
-        };
-        discordBtn.MouseEnter += (s, e) => discordBtn.BackColor = Color.FromArgb(50, 50, 50);
-        discordBtn.MouseLeave += (s, e) => discordBtn.BackColor = Color.Transparent;
-        titleBar.Controls.Add(discordBtn);
 
         // Drag functionality
         titleBar.MouseDown += TitleBar_MouseDown;
         titleBar.MouseMove += TitleBar_MouseMove;
         titleBar.MouseUp += TitleBar_MouseUp;
-        logoPanel.MouseDown += TitleBar_MouseDown;
-        logoPanel.MouseMove += TitleBar_MouseMove;
-        logoPanel.MouseUp += TitleBar_MouseUp;
 
         this.Controls.Add(titleBar);
     }
 
-    private Button CreateTitleBarButton(string text, int x, int y, int width, int height)
+    private Panel CreateWindowButton(string text, Color normalBg, Color hoverBg)
     {
-        var btn = new Button
+        var btn = new Panel
         {
-            Text = text,
-            Location = new Point(x, y),
-            Size = new Size(width, height),
-            FlatStyle = FlatStyle.Flat,
-            BackColor = Color.Transparent,
-            ForeColor = TextGray,
-            Font = new Font("Segoe UI", 10f),
+            Size = new Size(46, 40),
+            BackColor = normalBg,
             Cursor = Cursors.Hand
         };
-        btn.FlatAppearance.BorderSize = 0;
-        btn.FlatAppearance.MouseOverBackColor = Color.FromArgb(50, 50, 50);
-        btn.FlatAppearance.MouseDownBackColor = Color.FromArgb(60, 60, 60);
+        var lbl = new Label
+        {
+            Text = text,
+            Dock = DockStyle.Fill,
+            ForeColor = TextGray,
+            Font = new Font("Segoe UI", 10f),
+            TextAlign = ContentAlignment.MiddleCenter,
+            Cursor = Cursors.Hand
+        };
+        btn.Controls.Add(lbl);
+        btn.MouseEnter += (s, e) => btn.BackColor = hoverBg;
+        btn.MouseLeave += (s, e) => btn.BackColor = normalBg;
+        lbl.MouseEnter += (s, e) => btn.BackColor = hoverBg;
+        lbl.MouseLeave += (s, e) => btn.BackColor = normalBg;
+        lbl.Click += (s, e) => btn.OnClick(e);
         return btn;
     }
 
-    private void CreateTabBar()
+    private void CreateNavBar()
     {
-        tabBar = new Panel
+        navBar = new Panel
         {
-            Size = new Size(this.ClientSize.Width, 36),
-            Location = new Point(0, 42),
+            Dock = DockStyle.Top,
+            Height = 36,
             BackColor = BgDark
         };
-        tabBar.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
 
-        this.Controls.Add(tabBar);
-    }
+        int x = 50;
+        var navItems = new[] {
+            ("</> ", "Editor"),
+            ("◇ ", "Scripts"),
+            ("⚙ ", "Settings"),
+            ("👤 ", "Profile")
+        };
 
-    private void CreateNewTab()
-    {
-        // Save current tab content
-        if (activeTab != null)
+        foreach (var (icon, name) in navItems)
         {
-            activeTab.Content = codeEditor.Text;
+            var navBtn = CreateNavButton(icon + name, x, name == selectedNav);
+            navBtn.Tag = name;
+            navBtn.Click += NavButton_Click;
+            foreach (Control c in navBtn.Controls) c.Click += NavButton_Click;
+            navBar.Controls.Add(navBtn);
+            x += navBtn.Width + 5;
         }
 
-        var tabInfo = new TabInfo
-        {
-            Title = $"New Tab {tabCounter++}"
-        };
+        this.Controls.Add(navBar);
+    }
 
-        // Set default content - simple Hello World
-        tabInfo.Content = "print(\"Hello World\")";
-
-        // Tab panel
-        tabInfo.TabPanel = new Panel
+    private Panel CreateNavButton(string text, int x, bool selected)
+    {
+        var btn = new Panel
         {
-            Size = new Size(130, 28),
-            BackColor = TabBg,
+            Location = new Point(x, 4),
+            Size = new Size(90, 28),
+            BackColor = selected ? BgLight : Color.Transparent,
             Cursor = Cursors.Hand
         };
-        RoundCorners(tabInfo.TabPanel, 4);
+        if (selected) RoundCorners(btn, 6);
 
-        // Orange/red circle
-        var circle = new Panel
+        var lbl = new Label
         {
-            Size = new Size(12, 12),
-            Location = new Point(10, 8),
-            BackColor = AccentRed
+            Text = text,
+            Dock = DockStyle.Fill,
+            ForeColor = selected ? AccentGold : TextGray,
+            Font = new Font("Segoe UI", 9f),
+            TextAlign = ContentAlignment.MiddleCenter,
+            Cursor = Cursors.Hand
         };
-        RoundCorners(circle, 6);
-        tabInfo.TabPanel.Controls.Add(circle);
+        btn.Controls.Add(lbl);
 
-        // Tab text
-        tabInfo.TabLabel = new Label
+        if (!selected)
         {
-            Text = tabInfo.Title,
-            Location = new Point(26, 6),
+            btn.MouseEnter += (s, e) => { btn.BackColor = BgMedium; lbl.ForeColor = TextWhite; };
+            btn.MouseLeave += (s, e) => { btn.BackColor = Color.Transparent; lbl.ForeColor = TextGray; };
+            lbl.MouseEnter += (s, e) => { btn.BackColor = BgMedium; lbl.ForeColor = TextWhite; };
+            lbl.MouseLeave += (s, e) => { btn.BackColor = Color.Transparent; lbl.ForeColor = TextGray; };
+        }
+
+        return btn;
+    }
+
+    private void NavButton_Click(object? sender, EventArgs e)
+    {
+        // For now, just visual feedback - could expand later
+        var ctrl = sender as Control;
+        if (ctrl?.Tag != null)
+        {
+            selectedNav = ctrl.Tag.ToString()!;
+        }
+        else if (ctrl?.Parent?.Tag != null)
+        {
+            selectedNav = ctrl.Parent.Tag.ToString()!;
+        }
+        RefreshNavBar();
+    }
+
+    private void RefreshNavBar()
+    {
+        navBar.Controls.Clear();
+        int x = 50;
+        var navItems = new[] {
+            ("</> ", "Editor"),
+            ("◇ ", "Scripts"),
+            ("⚙ ", "Settings"),
+            ("👤 ", "Profile")
+        };
+
+        foreach (var (icon, name) in navItems)
+        {
+            var navBtn = CreateNavButton(icon + name, x, name == selectedNav);
+            navBtn.Tag = name;
+            navBtn.Click += NavButton_Click;
+            foreach (Control c in navBtn.Controls) c.Click += NavButton_Click;
+            navBar.Controls.Add(navBtn);
+            x += navBtn.Width + 5;
+        }
+    }
+
+    private void CreateFileTabBar()
+    {
+        fileTabBar = new Panel
+        {
+            Dock = DockStyle.Top,
+            Height = 32,
+            BackColor = BgDark
+        };
+
+        this.Controls.Add(fileTabBar);
+    }
+
+    private void CreateNewFileTab()
+    {
+        // Save current content
+        if (activeFileTab != null)
+        {
+            activeFileTab.Content = codeEditor.Text;
+        }
+
+        var tab = new FileTab
+        {
+            FileName = $"untitled{fileCounter++}.lua",
+            Content = ""
+        };
+
+        // Tab panel
+        tab.TabPanel = new Panel
+        {
+            Size = new Size(130, 26),
+            BackColor = BgLight,
+            Cursor = Cursors.Hand
+        };
+        RoundCorners(tab.TabPanel, 4);
+
+        // Lua icon
+        var luaIcon = new Label
+        {
+            Text = "☰",
+            Location = new Point(8, 5),
+            Size = new Size(16, 16),
+            ForeColor = Color.FromArgb(0, 122, 204),
+            Font = new Font("Segoe UI", 9f),
+            BackColor = Color.Transparent
+        };
+        tab.TabPanel.Controls.Add(luaIcon);
+
+        // File name
+        tab.NameLabel = new Label
+        {
+            Text = tab.FileName,
+            Location = new Point(26, 5),
             AutoSize = true,
-            ForeColor = TextWhite,
+            ForeColor = AccentGold,
             BackColor = Color.Transparent,
             Font = new Font("Segoe UI", 9f),
             Cursor = Cursors.Hand
         };
-        tabInfo.TabPanel.Controls.Add(tabInfo.TabLabel);
+        tab.TabPanel.Controls.Add(tab.NameLabel);
 
         // Close X
-        tabInfo.CloseBtn = new Label
+        tab.CloseBtn = new Label
         {
             Text = "×",
-            Location = new Point(108, 4),
-            Size = new Size(18, 20),
+            Location = new Point(110, 3),
+            Size = new Size(16, 20),
             ForeColor = TextGray,
             BackColor = Color.Transparent,
-            Font = new Font("Segoe UI", 11f),
+            Font = new Font("Segoe UI", 10f),
             TextAlign = ContentAlignment.MiddleCenter,
             Cursor = Cursors.Hand
         };
-        tabInfo.CloseBtn.MouseEnter += (s, e) => tabInfo.CloseBtn.ForeColor = TextWhite;
-        tabInfo.CloseBtn.MouseLeave += (s, e) => tabInfo.CloseBtn.ForeColor = TextGray;
-        tabInfo.CloseBtn.Click += (s, e) => CloseTab(tabInfo);
-        tabInfo.TabPanel.Controls.Add(tabInfo.CloseBtn);
+        tab.CloseBtn.MouseEnter += (s, e) => tab.CloseBtn.ForeColor = TextWhite;
+        tab.CloseBtn.MouseLeave += (s, e) => tab.CloseBtn.ForeColor = TextGray;
+        tab.CloseBtn.Click += (s, e) => CloseFileTab(tab);
+        tab.TabPanel.Controls.Add(tab.CloseBtn);
 
-        // Click to select tab
-        tabInfo.TabPanel.Click += (s, e) => SelectTab(tabInfo);
-        tabInfo.TabLabel.Click += (s, e) => SelectTab(tabInfo);
-        circle.Click += (s, e) => SelectTab(tabInfo);
+        // Click to select
+        tab.TabPanel.Click += (s, e) => SelectFileTab(tab);
+        tab.NameLabel.Click += (s, e) => SelectFileTab(tab);
+        luaIcon.Click += (s, e) => SelectFileTab(tab);
 
-        tabs.Add(tabInfo);
-        RefreshTabBar();
-        SelectTab(tabInfo);
+        fileTabs.Add(tab);
+        RefreshFileTabBar();
+        SelectFileTab(tab);
     }
 
-    private void SelectTab(TabInfo tab)
+    private void SelectFileTab(FileTab tab)
     {
-        // Save current content
-        if (activeTab != null)
+        // Save current
+        if (activeFileTab != null)
         {
-            activeTab.Content = codeEditor.Text;
-            activeTab.TabPanel.BackColor = Color.FromArgb(28, 28, 28);
+            activeFileTab.Content = codeEditor.Text;
+            activeFileTab.TabPanel.BackColor = BgMedium;
+            activeFileTab.NameLabel.ForeColor = TextGray;
         }
 
-        activeTab = tab;
-        tab.TabPanel.BackColor = TabBg;
+        activeFileTab = tab;
+        tab.TabPanel.BackColor = BgLight;
+        tab.NameLabel.ForeColor = AccentGold;
 
-        // Load tab content
         codeEditor.Text = tab.Content;
         HighlightSyntax();
         UpdateLineNumbers();
-        minimapPanel?.Invalidate(); // Refresh minimap
     }
 
-    private void CloseTab(TabInfo tab)
+    private void CloseFileTab(FileTab tab)
     {
-        if (tabs.Count <= 1)
+        if (fileTabs.Count <= 1)
         {
-            // Don't close last tab, just clear it
             codeEditor.Clear();
             return;
         }
 
-        int index = tabs.IndexOf(tab);
-        tabs.Remove(tab);
-        tabBar.Controls.Remove(tab.TabPanel);
+        int index = fileTabs.IndexOf(tab);
+        fileTabs.Remove(tab);
+        fileTabBar.Controls.Remove(tab.TabPanel);
 
-        if (activeTab == tab)
+        if (activeFileTab == tab)
         {
-            // Select another tab
-            int newIndex = Math.Min(index, tabs.Count - 1);
-            SelectTab(tabs[newIndex]);
+            int newIndex = Math.Min(index, fileTabs.Count - 1);
+            SelectFileTab(fileTabs[newIndex]);
         }
 
-        RefreshTabBar();
+        RefreshFileTabBar();
     }
 
-    private void RefreshTabBar()
+    private void RefreshFileTabBar()
     {
-        // Clear tab bar
-        tabBar.Controls.Clear();
+        fileTabBar.Controls.Clear();
 
-        // Add tabs
-        int x = 12;
-        foreach (var tab in tabs)
+        int x = 8;
+        foreach (var tab in fileTabs)
         {
-            tab.TabPanel.Location = new Point(x, 4);
-            tabBar.Controls.Add(tab.TabPanel);
+            tab.TabPanel.Location = new Point(x, 3);
+            fileTabBar.Controls.Add(tab.TabPanel);
             x += 135;
         }
 
-        // Add plus button
+        // Plus button
         var plusBtn = new Label
         {
             Text = "+",
-            Location = new Point(x + 5, 6),
-            Size = new Size(24, 24),
+            Location = new Point(x + 5, 5),
+            Size = new Size(24, 22),
             ForeColor = TextGray,
             BackColor = Color.Transparent,
-            Font = new Font("Segoe UI", 14f),
+            Font = new Font("Segoe UI", 12f),
             TextAlign = ContentAlignment.MiddleCenter,
             Cursor = Cursors.Hand
         };
         plusBtn.MouseEnter += (s, e) => plusBtn.ForeColor = TextWhite;
         plusBtn.MouseLeave += (s, e) => plusBtn.ForeColor = TextGray;
-        plusBtn.Click += (s, e) => CreateNewTab();
-        tabBar.Controls.Add(plusBtn);
+        plusBtn.Click += (s, e) => CreateNewFileTab();
+        fileTabBar.Controls.Add(plusBtn);
+    }
+
+    private void CreateToolbar()
+    {
+        toolbar = new Panel
+        {
+            Dock = DockStyle.Top,
+            Height = 36,
+            BackColor = BgDark
+        };
+
+        // Left buttons
+        int x = 8;
+        var leftButtons = new[] {
+            ("▶", "Execute"),
+            ("🗑", "Clear"),
+            ("📁", "Open"),
+            ("💾", "Save")
+        };
+
+        foreach (var (icon, text) in leftButtons)
+        {
+            var btn = CreateToolbarButton(icon, text, x);
+            toolbar.Controls.Add(btn);
+            x += btn.Width + 5;
+        }
+
+        // Right button (Attach)
+        var attachBtn = CreateToolbarButton("📎", "Attach", this.ClientSize.Width - 90);
+        attachBtn.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+        toolbar.Controls.Add(attachBtn);
+
+        this.Controls.Add(toolbar);
+    }
+
+    private Panel CreateToolbarButton(string icon, string text, int x)
+    {
+        var btn = new Panel
+        {
+            Location = new Point(x, 4),
+            Size = new Size(75, 28),
+            BackColor = Color.Transparent,
+            Cursor = Cursors.Hand
+        };
+
+        var lbl = new Label
+        {
+            Text = $"{icon}  {text}",
+            Dock = DockStyle.Fill,
+            ForeColor = TextGray,
+            BackColor = Color.Transparent,
+            Font = new Font("Segoe UI", 9f),
+            TextAlign = ContentAlignment.MiddleCenter,
+            Cursor = Cursors.Hand
+        };
+        btn.Controls.Add(lbl);
+
+        btn.MouseEnter += (s, e) => { btn.BackColor = BgMedium; lbl.ForeColor = TextWhite; };
+        btn.MouseLeave += (s, e) => { btn.BackColor = Color.Transparent; lbl.ForeColor = TextGray; };
+        lbl.MouseEnter += (s, e) => { btn.BackColor = BgMedium; lbl.ForeColor = TextWhite; };
+        lbl.MouseLeave += (s, e) => { btn.BackColor = Color.Transparent; lbl.ForeColor = TextGray; };
+
+        if (text == "Clear")
+        {
+            lbl.Click += (s, e) => codeEditor.Clear();
+            btn.Click += (s, e) => codeEditor.Clear();
+        }
+
+        return btn;
     }
 
     private void CreateEditorPanel()
     {
         editorPanel = new Panel
         {
-            Location = new Point(0, 78),
-            Size = new Size(this.ClientSize.Width, this.ClientSize.Height - 78 - 48),
-            BackColor = BgEditor
+            Dock = DockStyle.Fill,
+            BackColor = BgDark,
+            Padding = new Padding(0)
         };
-        editorPanel.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
-
-        // Minimap panel on the RIGHT side
-        minimapPanel = new Panel
-        {
-            Size = new Size(100, editorPanel.Height),
-            Location = new Point(editorPanel.Width - 100, 0),
-            BackColor = Color.FromArgb(25, 25, 25)
-        };
-        minimapPanel.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Right;
-        minimapPanel.Paint += MinimapPanel_Paint;
-        editorPanel.Controls.Add(minimapPanel);
 
         // Line numbers
         lineNumbers = new RichTextBox
         {
             Location = new Point(0, 0),
-            Size = new Size(55, editorPanel.Height),
-            BackColor = BgEditor,
+            Width = 45,
+            Dock = DockStyle.Left,
+            BackColor = BgDark,
             ForeColor = TextGray,
             Font = new Font("Consolas", 11f),
             BorderStyle = BorderStyle.None,
             ReadOnly = true,
             ScrollBars = RichTextBoxScrollBars.None,
-            Text = string.Join("\n", Enumerable.Range(1, 30)),
+            Text = "1",
             Cursor = Cursors.Arrow
         };
-        lineNumbers.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left;
         lineNumbers.SelectAll();
         lineNumbers.SelectionAlignment = HorizontalAlignment.Right;
         lineNumbers.DeselectAll();
-        editorPanel.Controls.Add(lineNumbers);
 
-        // Code editor (between line numbers and minimap - scrollbar is integrated in minimap)
+        // Code editor
         codeEditor = new RichTextBox
         {
-            Location = new Point(55, 0),
-            Size = new Size(editorPanel.Width - 55 - 100, editorPanel.Height),
-            BackColor = BgEditor,
+            Dock = DockStyle.Fill,
+            BackColor = BgDark,
             ForeColor = TextWhite,
             Font = new Font("Consolas", 11f),
             BorderStyle = BorderStyle.None,
             AcceptsTab = true,
-            WordWrap = false,
-            ScrollBars = RichTextBoxScrollBars.None // Hide default scrollbar - using minimap scrollbar
+            WordWrap = false
         };
-        codeEditor.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
         codeEditor.TextChanged += CodeEditor_TextChanged;
         codeEditor.VScroll += CodeEditor_VScroll;
 
-        // Indent guides overlay panel (transparent, draws lines over editor)
-        indentGuidesPanel = new Panel
-        {
-            Location = codeEditor.Location,
-            Size = codeEditor.Size,
-            BackColor = Color.Transparent
-        };
-        indentGuidesPanel.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
-        indentGuidesPanel.Paint += IndentGuidesPanel_Paint;
-        codeEditor.MouseWheel += (s, e) => { minimapPanel?.Invalidate(); indentGuidesPanel?.Invalidate(); };
-
         editorPanel.Controls.Add(codeEditor);
-        editorPanel.Controls.Add(indentGuidesPanel);
-        indentGuidesPanel.BringToFront();
-        // Make indent guides transparent to mouse clicks (pass through to editor)
-        indentGuidesPanel.Enabled = false;
+        editorPanel.Controls.Add(lineNumbers);
 
         this.Controls.Add(editorPanel);
     }
 
-    private void IndentGuidesPanel_Paint(object? sender, PaintEventArgs e)
+    private void CreateConsolePanel()
     {
-        if (codeEditor == null || codeEditor.Lines.Length == 0) return;
-
-        var g = e.Graphics;
-        int lineHeight = codeEditor.Font.Height;
-        int tabWidth = 4; // 4 spaces per tab
-        float charWidth = g.MeasureString("M", codeEditor.Font).Width * 0.55f; // Approximate char width
-
-        // Get scroll position
-        int firstVisibleChar = codeEditor.GetCharIndexFromPosition(new Point(0, 0));
-        int firstVisibleLine = codeEditor.GetLineFromCharIndex(firstVisibleChar);
-
-        using var pen = new Pen(Color.FromArgb(50, 50, 50), 1);
-        pen.DashStyle = DashStyle.Solid;
-
-        int visibleLines = codeEditor.Height / lineHeight + 2;
-
-        for (int i = 0; i < visibleLines && (firstVisibleLine + i) < codeEditor.Lines.Length; i++)
+        consolePanel = new Panel
         {
-            int lineIndex = firstVisibleLine + i;
-            if (lineIndex < 0 || lineIndex >= codeEditor.Lines.Length) continue;
-
-            string line = codeEditor.Lines[lineIndex];
-            int indent = 0;
-
-            // Count leading spaces/tabs
-            foreach (char c in line)
-            {
-                if (c == ' ') indent++;
-                else if (c == '\t') indent += tabWidth;
-                else break;
-            }
-
-            // Draw vertical lines for each indent level
-            int indentLevels = indent / tabWidth;
-            int y = i * lineHeight;
-
-            for (int level = 1; level <= indentLevels; level++)
-            {
-                float x = (level * tabWidth * charWidth) - charWidth;
-                g.DrawLine(pen, x, y, x, y + lineHeight);
-            }
-        }
-    }
-
-    private void MinimapPanel_Paint(object? sender, PaintEventArgs e)
-    {
-        if (codeEditor == null || string.IsNullOrEmpty(codeEditor.Text)) return;
-
-        var g = e.Graphics;
-        g.Clear(Color.FromArgb(30, 30, 30));
-
-        string[] lines = codeEditor.Text.Split('\n');
-        float lineHeight = 2f;
-        float charWidth = 1f;
-        float y = 2;
-        float maxWidth = minimapPanel.Width - 15; // Leave space for scrollbar
-
-        var keywords = new HashSet<string> { "local", "function", "end", "if", "then", "else", "elseif",
-                                              "while", "do", "for", "in", "return", "not", "and", "or", "nil", "true", "false", "print", "task", "spawn", "warn", "getfenv", "string", "match" };
-
-        using var whiteBrush = new SolidBrush(Color.FromArgb(140, 140, 140));
-        using var redBrush = new SolidBrush(Color.FromArgb(200, 90, 80));
-        using var stringBrush = new SolidBrush(Color.FromArgb(180, 120, 100));
-        using var commentBrush = new SolidBrush(Color.FromArgb(80, 80, 80));
-        using var numberBrush = new SolidBrush(Color.FromArgb(180, 140, 100));
-
-        foreach (var line in lines)
-        {
-            if (y > minimapPanel.Height - 5) break;
-
-            float x = 3;
-            string trimmed = line.TrimStart();
-            int indent = line.Length - trimmed.Length;
-            x += indent * charWidth * 0.5f;
-
-            // Check if line is a comment
-            if (trimmed.StartsWith("--"))
-            {
-                float width = Math.Min(trimmed.Length * charWidth, maxWidth - x);
-                if (width > 0) g.FillRectangle(commentBrush, x, y, width, lineHeight);
-            }
-            else
-            {
-                // Parse and draw colored blocks for tokens
-                string currentLine = trimmed;
-                int pos = 0;
-
-                while (pos < currentLine.Length && x < maxWidth)
-                {
-                    // Skip whitespace
-                    if (char.IsWhiteSpace(currentLine[pos]))
-                    {
-                        pos++;
-                        x += charWidth;
-                        continue;
-                    }
-
-                    // Check for string
-                    if (currentLine[pos] == '"' || currentLine[pos] == '\'')
-                    {
-                        char quote = currentLine[pos];
-                        int endPos = pos + 1;
-                        while (endPos < currentLine.Length && currentLine[endPos] != quote)
-                            endPos++;
-                        if (endPos < currentLine.Length) endPos++;
-
-                        float width = Math.Min((endPos - pos) * charWidth, maxWidth - x);
-                        if (width > 0) g.FillRectangle(stringBrush, x, y, width, lineHeight);
-                        x += (endPos - pos) * charWidth;
-                        pos = endPos;
-                        continue;
-                    }
-
-                    // Check for number
-                    if (char.IsDigit(currentLine[pos]))
-                    {
-                        int endPos = pos;
-                        while (endPos < currentLine.Length && (char.IsDigit(currentLine[endPos]) || currentLine[endPos] == '.'))
-                            endPos++;
-
-                        float width = Math.Min((endPos - pos) * charWidth, maxWidth - x);
-                        if (width > 0) g.FillRectangle(numberBrush, x, y, width, lineHeight);
-                        x += (endPos - pos) * charWidth;
-                        pos = endPos;
-                        continue;
-                    }
-
-                    // Check for word (identifier or keyword)
-                    if (char.IsLetter(currentLine[pos]) || currentLine[pos] == '_')
-                    {
-                        int endPos = pos;
-                        while (endPos < currentLine.Length && (char.IsLetterOrDigit(currentLine[endPos]) || currentLine[endPos] == '_'))
-                            endPos++;
-
-                        string word = currentLine.Substring(pos, endPos - pos);
-                        var brush = keywords.Contains(word) ? redBrush : whiteBrush;
-                        float width = Math.Min((endPos - pos) * charWidth, maxWidth - x);
-                        if (width > 0) g.FillRectangle(brush, x, y, width, lineHeight);
-                        x += (endPos - pos) * charWidth;
-                        pos = endPos;
-                        continue;
-                    }
-
-                    // Other characters (operators, etc)
-                    g.FillRectangle(whiteBrush, x, y, charWidth, lineHeight);
-                    x += charWidth;
-                    pos++;
-                }
-            }
-
-            y += lineHeight + 1;
-        }
-
-        // Draw scrollbar track on the right side of minimap
-        int scrollTrackX = minimapPanel.Width - 10;
-        using var trackBrush = new SolidBrush(Color.FromArgb(20, 20, 20));
-        g.FillRectangle(trackBrush, scrollTrackX, 0, 10, minimapPanel.Height);
-
-        // Draw scrollbar thumb (viewport indicator) as dark bar
-        if (codeEditor.Lines.Length > 0)
-        {
-            int totalLines = Math.Max(1, codeEditor.Lines.Length);
-            int visibleLines = Math.Max(1, codeEditor.Height / codeEditor.Font.Height);
-
-            if (totalLines > visibleLines)
-            {
-                int firstVisibleChar = codeEditor.GetCharIndexFromPosition(new Point(0, 0));
-                int firstVisibleLine = codeEditor.GetLineFromCharIndex(firstVisibleChar);
-
-                float thumbHeight = Math.Max(20, (float)visibleLines / totalLines * minimapPanel.Height);
-                float maxThumbTop = minimapPanel.Height - thumbHeight;
-                float scrollPercent = (float)firstVisibleLine / (totalLines - visibleLines);
-                float thumbY = scrollPercent * maxThumbTop;
-
-                using var thumbBrush = new SolidBrush(Color.FromArgb(60, 60, 60));
-                g.FillRectangle(thumbBrush, scrollTrackX + 1, thumbY, 8, thumbHeight);
-            }
-        }
-    }
-
-    private void CreateToolbar()
-    {
-        toolbarPanel = new Panel
-        {
-            Location = new Point(0, this.ClientSize.Height - 48),
-            Size = new Size(this.ClientSize.Width, 48),
-            BackColor = BgEditor
-        };
-        toolbarPanel.Anchor = AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
-
-        var buttons = new[] {
-            ("▷", "Execute"),
-            ("🗑", "Clear"),
-            ("📂", "Open"),
-            ("💾", "Save"),
-            ("📡", "Attach"),
-            ("⊗", "Kill")
+            Dock = DockStyle.Bottom,
+            Height = 36,
+            BackColor = BgMedium
         };
 
-        int totalWidth = buttons.Length * 95;
-        int startX = (this.ClientSize.Width - totalWidth) / 2;
-
-        for (int i = 0; i < buttons.Length; i++)
+        // Console icon and label
+        var iconLabel = new Label
         {
-            var (icon, text) = buttons[i];
-            var btn = CreateToolbarButton(icon, text, startX + i * 95);
-            toolbarPanel.Controls.Add(btn);
-        }
-
-        toolbarPanel.Resize += (s, e) =>
-        {
-            int newStartX = (toolbarPanel.Width - totalWidth) / 2;
-            for (int i = 0; i < toolbarPanel.Controls.Count; i++)
-            {
-                toolbarPanel.Controls[i].Location = new Point(newStartX + i * 95, 10);
-            }
+            Text = "▣",
+            Location = new Point(12, 8),
+            AutoSize = true,
+            ForeColor = TextGray,
+            Font = new Font("Segoe UI", 10f),
+            BackColor = Color.Transparent
         };
+        consolePanel.Controls.Add(iconLabel);
 
-        this.Controls.Add(toolbarPanel);
-    }
-
-    private Panel CreateToolbarButton(string icon, string text, int x)
-    {
-        var panel = new Panel
+        consoleLabel = new Label
         {
-            Location = new Point(x, 10),
-            Size = new Size(88, 28),
-            BackColor = Color.Transparent,
-            Cursor = Cursors.Hand
-        };
-
-        var label = new Label
-        {
-            Text = $"{icon}  {text}",
-            Dock = DockStyle.Fill,
-            ForeColor = TextWhite,
-            BackColor = Color.Transparent,
+            Text = "Console",
+            Location = new Point(32, 9),
+            AutoSize = true,
+            ForeColor = TextGray,
             Font = new Font("Segoe UI", 9.5f),
-            TextAlign = ContentAlignment.MiddleCenter,
-            Cursor = Cursors.Hand
+            BackColor = Color.Transparent
         };
+        consolePanel.Controls.Add(consoleLabel);
 
-        panel.Controls.Add(label);
-
-        panel.MouseEnter += (s, e) => panel.BackColor = Color.FromArgb(50, 50, 50);
-        panel.MouseLeave += (s, e) => panel.BackColor = Color.Transparent;
-        label.MouseEnter += (s, e) => panel.BackColor = Color.FromArgb(50, 50, 50);
-        label.MouseLeave += (s, e) => panel.BackColor = Color.Transparent;
-
-        if (text == "Clear")
+        // Expand/collapse arrow
+        var arrowLabel = new Label
         {
-            label.Click += (s, e) => codeEditor.Clear();
-            panel.Click += (s, e) => codeEditor.Clear();
-        }
+            Text = "▼",
+            Location = new Point(this.ClientSize.Width - 40, 9),
+            Size = new Size(24, 20),
+            ForeColor = TextGray,
+            Font = new Font("Segoe UI", 9f),
+            TextAlign = ContentAlignment.MiddleCenter,
+            Cursor = Cursors.Hand,
+            Anchor = AnchorStyles.Top | AnchorStyles.Right
+        };
+        arrowLabel.Click += (s, e) => ToggleConsole(arrowLabel);
+        consolePanel.Controls.Add(arrowLabel);
 
-        return panel;
+        // Make whole panel clickable
+        consolePanel.Click += (s, e) => ToggleConsole(arrowLabel);
+        consolePanel.Cursor = Cursors.Hand;
+
+        this.Controls.Add(consolePanel);
+    }
+
+    private void ToggleConsole(Label arrow)
+    {
+        consoleExpanded = !consoleExpanded;
+        if (consoleExpanded)
+        {
+            consolePanel.Height = 150;
+            arrow.Text = "▲";
+        }
+        else
+        {
+            consolePanel.Height = 36;
+            arrow.Text = "▼";
+        }
     }
 
     private void HighlightSyntax()
@@ -682,7 +609,6 @@ public class MainForm : Form
         int selLen = codeEditor.SelectionLength;
 
         codeEditor.SuspendLayout();
-
         codeEditor.SelectAll();
         codeEditor.SelectionColor = TextWhite;
 
@@ -706,7 +632,6 @@ public class MainForm : Form
 
         codeEditor.SelectionStart = selStart;
         codeEditor.SelectionLength = selLen;
-
         codeEditor.ResumeLayout();
         isHighlighting = false;
     }
@@ -753,9 +678,7 @@ public class MainForm : Form
     private void CodeEditor_TextChanged(object? sender, EventArgs e)
     {
         UpdateLineNumbers();
-        HighlightSyntax(); // Real-time syntax highlighting
-        minimapPanel?.Invalidate(); // Minimap includes scrollbar
-        indentGuidesPanel?.Invalidate();
+        HighlightSyntax();
     }
 
     private void CodeEditor_VScroll(object? sender, EventArgs e)
@@ -772,9 +695,6 @@ public class MainForm : Form
                 lineNumbers.ScrollToCaret();
             }
         }
-
-        minimapPanel?.Invalidate(); // Minimap includes scrollbar
-        indentGuidesPanel?.Invalidate();
     }
 
     private void UpdateLineNumbers()
@@ -794,7 +714,15 @@ public class MainForm : Form
     protected override void OnPaint(PaintEventArgs e)
     {
         base.OnPaint(e);
-        using var pen = new Pen(Color.FromArgb(45, 45, 45), 1);
-        e.Graphics.DrawRectangle(pen, 0, 0, Width - 1, Height - 1);
+        // Rounded corners for the form
+        using var path = new GraphicsPath();
+        int radius = 12;
+        var rect = new Rectangle(0, 0, Width, Height);
+        path.AddArc(rect.X, rect.Y, radius * 2, radius * 2, 180, 90);
+        path.AddArc(rect.Right - radius * 2, rect.Y, radius * 2, radius * 2, 270, 90);
+        path.AddArc(rect.Right - radius * 2, rect.Bottom - radius * 2, radius * 2, radius * 2, 0, 90);
+        path.AddArc(rect.X, rect.Bottom - radius * 2, radius * 2, radius * 2, 90, 90);
+        path.CloseFigure();
+        this.Region = new Region(path);
     }
 }
