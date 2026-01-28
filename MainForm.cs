@@ -20,8 +20,6 @@ public class MainForm : Form
     private RichTextBox lineNumbers;
     private RichTextBox codeEditor;
     private Panel minimapPanel;
-    private Panel scrollbarPanel;
-    private Panel scrollbarThumb;
     private Panel indentGuidesPanel;
 
     // Tab management
@@ -33,8 +31,6 @@ public class MainForm : Form
     private bool isDragging = false;
     private Point dragOffset;
     private bool isHighlighting = false;
-    private bool isScrollbarDragging = false;
-    private int scrollbarDragOffset = 0;
 
     private class TabInfo
     {
@@ -377,74 +373,18 @@ public class MainForm : Form
         lineNumbers.DeselectAll();
         editorPanel.Controls.Add(lineNumbers);
 
-        // Custom scrollbar on the right (dark/black style) - hidden by default
-        scrollbarPanel = new Panel
-        {
-            Size = new Size(12, editorPanel.Height),
-            Location = new Point(editorPanel.Width - 112, 0), // Left of minimap
-            BackColor = Color.FromArgb(20, 20, 20),
-            Visible = false // Only show when content overflows
-        };
-        scrollbarPanel.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Right;
-
-        scrollbarThumb = new Panel
-        {
-            Size = new Size(8, 50),
-            Location = new Point(2, 0),
-            BackColor = Color.FromArgb(50, 50, 50),
-            Cursor = Cursors.Hand
-        };
-        RoundCorners(scrollbarThumb, 4);
-
-        // Scrollbar thumb dragging
-        scrollbarThumb.MouseDown += (s, e) =>
-        {
-            if (e.Button == MouseButtons.Left)
-            {
-                isScrollbarDragging = true;
-                scrollbarDragOffset = e.Y;
-            }
-        };
-        scrollbarThumb.MouseMove += (s, e) =>
-        {
-            if (isScrollbarDragging)
-            {
-                int newY = scrollbarThumb.Top + e.Y - scrollbarDragOffset;
-                newY = Math.Max(0, Math.Min(scrollbarPanel.Height - scrollbarThumb.Height, newY));
-                scrollbarThumb.Top = newY;
-
-                // Scroll the editor
-                int totalLines = Math.Max(1, codeEditor.Lines.Length);
-                int lineHeight = codeEditor.Font.Height;
-                float scrollPercent = (float)newY / (scrollbarPanel.Height - scrollbarThumb.Height);
-                int targetLine = (int)(scrollPercent * totalLines);
-                if (targetLine >= 0 && targetLine < codeEditor.Lines.Length)
-                {
-                    int charIndex = codeEditor.GetFirstCharIndexFromLine(targetLine);
-                    codeEditor.SelectionStart = charIndex;
-                    codeEditor.ScrollToCaret();
-                }
-            }
-        };
-        scrollbarThumb.MouseUp += (s, e) => isScrollbarDragging = false;
-        scrollbarThumb.MouseEnter += (s, e) => scrollbarThumb.BackColor = Color.FromArgb(70, 70, 70);
-        scrollbarThumb.MouseLeave += (s, e) => scrollbarThumb.BackColor = Color.FromArgb(50, 50, 50);
-
-        scrollbarPanel.Controls.Add(scrollbarThumb);
-        editorPanel.Controls.Add(scrollbarPanel);
-
-        // Code editor (between line numbers and minimap - scrollbar only shows when needed)
+        // Code editor (between line numbers and minimap - scrollbar is integrated in minimap)
         codeEditor = new RichTextBox
         {
             Location = new Point(55, 0),
-            Size = new Size(editorPanel.Width - 55 - 100, editorPanel.Height), // Full width to minimap when scrollbar hidden
+            Size = new Size(editorPanel.Width - 55 - 100, editorPanel.Height),
             BackColor = BgEditor,
             ForeColor = TextWhite,
             Font = new Font("Consolas", 11f),
             BorderStyle = BorderStyle.None,
             AcceptsTab = true,
             WordWrap = false,
-            ScrollBars = RichTextBoxScrollBars.None // Hide default scrollbar
+            ScrollBars = RichTextBoxScrollBars.None // Hide default scrollbar - using minimap scrollbar
         };
         codeEditor.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
         codeEditor.TextChanged += CodeEditor_TextChanged;
@@ -459,9 +399,7 @@ public class MainForm : Form
         };
         indentGuidesPanel.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
         indentGuidesPanel.Paint += IndentGuidesPanel_Paint;
-        indentGuidesPanel.MouseDown += (s, e) => { codeEditor.Focus(); };
-        indentGuidesPanel.MouseWheel += (s, e) => { codeEditor.Focus(); CodeEditor_MouseWheel(s, e); };
-        codeEditor.MouseWheel += CodeEditor_MouseWheel;
+        codeEditor.MouseWheel += (s, e) => { minimapPanel?.Invalidate(); indentGuidesPanel?.Invalidate(); };
 
         editorPanel.Controls.Add(codeEditor);
         editorPanel.Controls.Add(indentGuidesPanel);
@@ -470,12 +408,6 @@ public class MainForm : Form
         indentGuidesPanel.Enabled = false;
 
         this.Controls.Add(editorPanel);
-    }
-
-    private void CodeEditor_MouseWheel(object? sender, MouseEventArgs e)
-    {
-        UpdateScrollbarThumb();
-        indentGuidesPanel?.Invalidate();
     }
 
     private void IndentGuidesPanel_Paint(object? sender, PaintEventArgs e)
@@ -529,49 +461,51 @@ public class MainForm : Form
         if (codeEditor == null || string.IsNullOrEmpty(codeEditor.Text)) return;
 
         var g = e.Graphics;
-        g.Clear(Color.FromArgb(25, 25, 25));
-        g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
+        g.Clear(Color.FromArgb(30, 30, 30));
 
         string[] lines = codeEditor.Text.Split('\n');
-        float fontSize = 3f; // Very small font for minimap
-        float lineHeight = 4.5f;
-        float y = 5;
+        float lineHeight = 2f;
+        float charWidth = 1f;
+        float y = 2;
+        float maxWidth = minimapPanel.Width - 15; // Leave space for scrollbar
 
         var keywords = new HashSet<string> { "local", "function", "end", "if", "then", "else", "elseif",
-                                              "while", "do", "for", "in", "return", "not", "and", "or", "nil", "true", "false", "print" };
+                                              "while", "do", "for", "in", "return", "not", "and", "or", "nil", "true", "false", "print", "task", "spawn", "warn", "getfenv", "string", "match" };
 
-        using var miniFont = new Font("Consolas", fontSize, FontStyle.Regular);
-        using var whiteBrush = new SolidBrush(Color.FromArgb(160, 160, 160));
-        using var redBrush = new SolidBrush(Color.FromArgb(220, 90, 80));
-        using var stringBrush = new SolidBrush(Color.FromArgb(100, 180, 100));
-        using var commentBrush = new SolidBrush(Color.FromArgb(100, 100, 100));
+        using var whiteBrush = new SolidBrush(Color.FromArgb(140, 140, 140));
+        using var redBrush = new SolidBrush(Color.FromArgb(200, 90, 80));
+        using var stringBrush = new SolidBrush(Color.FromArgb(180, 120, 100));
+        using var commentBrush = new SolidBrush(Color.FromArgb(80, 80, 80));
+        using var numberBrush = new SolidBrush(Color.FromArgb(180, 140, 100));
 
         foreach (var line in lines)
         {
             if (y > minimapPanel.Height - 5) break;
 
-            // Draw each line with syntax highlighting
             float x = 3;
-            string remaining = line;
+            string trimmed = line.TrimStart();
+            int indent = line.Length - trimmed.Length;
+            x += indent * charWidth * 0.5f;
 
             // Check if line is a comment
-            if (remaining.TrimStart().StartsWith("--"))
+            if (trimmed.StartsWith("--"))
             {
-                g.DrawString(remaining, miniFont, commentBrush, x, y);
+                float width = Math.Min(trimmed.Length * charWidth, maxWidth - x);
+                if (width > 0) g.FillRectangle(commentBrush, x, y, width, lineHeight);
             }
             else
             {
-                // Parse and draw tokens with colors
-                string currentLine = remaining;
+                // Parse and draw colored blocks for tokens
+                string currentLine = trimmed;
                 int pos = 0;
 
-                while (pos < currentLine.Length)
+                while (pos < currentLine.Length && x < maxWidth)
                 {
                     // Skip whitespace
                     if (char.IsWhiteSpace(currentLine[pos]))
                     {
                         pos++;
-                        x += fontSize * 0.6f;
+                        x += charWidth;
                         continue;
                     }
 
@@ -582,17 +516,31 @@ public class MainForm : Form
                         int endPos = pos + 1;
                         while (endPos < currentLine.Length && currentLine[endPos] != quote)
                             endPos++;
-                        if (endPos < currentLine.Length) endPos++; // include closing quote
+                        if (endPos < currentLine.Length) endPos++;
 
-                        string str = currentLine.Substring(pos, endPos - pos);
-                        g.DrawString(str, miniFont, stringBrush, x, y);
-                        x += str.Length * fontSize * 0.6f;
+                        float width = Math.Min((endPos - pos) * charWidth, maxWidth - x);
+                        if (width > 0) g.FillRectangle(stringBrush, x, y, width, lineHeight);
+                        x += (endPos - pos) * charWidth;
+                        pos = endPos;
+                        continue;
+                    }
+
+                    // Check for number
+                    if (char.IsDigit(currentLine[pos]))
+                    {
+                        int endPos = pos;
+                        while (endPos < currentLine.Length && (char.IsDigit(currentLine[endPos]) || currentLine[endPos] == '.'))
+                            endPos++;
+
+                        float width = Math.Min((endPos - pos) * charWidth, maxWidth - x);
+                        if (width > 0) g.FillRectangle(numberBrush, x, y, width, lineHeight);
+                        x += (endPos - pos) * charWidth;
                         pos = endPos;
                         continue;
                     }
 
                     // Check for word (identifier or keyword)
-                    if (char.IsLetterOrDigit(currentLine[pos]) || currentLine[pos] == '_')
+                    if (char.IsLetter(currentLine[pos]) || currentLine[pos] == '_')
                     {
                         int endPos = pos;
                         while (endPos < currentLine.Length && (char.IsLetterOrDigit(currentLine[endPos]) || currentLine[endPos] == '_'))
@@ -600,38 +548,46 @@ public class MainForm : Form
 
                         string word = currentLine.Substring(pos, endPos - pos);
                         var brush = keywords.Contains(word) ? redBrush : whiteBrush;
-                        g.DrawString(word, miniFont, brush, x, y);
-                        x += word.Length * fontSize * 0.6f;
+                        float width = Math.Min((endPos - pos) * charWidth, maxWidth - x);
+                        if (width > 0) g.FillRectangle(brush, x, y, width, lineHeight);
+                        x += (endPos - pos) * charWidth;
                         pos = endPos;
                         continue;
                     }
 
                     // Other characters (operators, etc)
-                    g.DrawString(currentLine[pos].ToString(), miniFont, whiteBrush, x, y);
-                    x += fontSize * 0.6f;
+                    g.FillRectangle(whiteBrush, x, y, charWidth, lineHeight);
+                    x += charWidth;
                     pos++;
                 }
             }
 
-            y += lineHeight;
+            y += lineHeight + 1;
         }
 
-        // Draw viewport indicator
+        // Draw scrollbar track on the right side of minimap
+        int scrollTrackX = minimapPanel.Width - 10;
+        using var trackBrush = new SolidBrush(Color.FromArgb(20, 20, 20));
+        g.FillRectangle(trackBrush, scrollTrackX, 0, 10, minimapPanel.Height);
+
+        // Draw scrollbar thumb (viewport indicator) as dark bar
         if (codeEditor.Lines.Length > 0)
         {
-            int firstVisibleChar = codeEditor.GetCharIndexFromPosition(new Point(0, 0));
-            int firstVisibleLine = codeEditor.GetLineFromCharIndex(firstVisibleChar);
+            int totalLines = Math.Max(1, codeEditor.Lines.Length);
+            int visibleLines = Math.Max(1, codeEditor.Height / codeEditor.Font.Height);
 
-            int visibleLines = codeEditor.Height / codeEditor.Font.Height;
-            int totalLines = codeEditor.Lines.Length;
-
-            if (totalLines > 0)
+            if (totalLines > visibleLines)
             {
-                float viewportY = 5 + (firstVisibleLine * lineHeight);
-                float viewportHeight = visibleLines * lineHeight;
+                int firstVisibleChar = codeEditor.GetCharIndexFromPosition(new Point(0, 0));
+                int firstVisibleLine = codeEditor.GetLineFromCharIndex(firstVisibleChar);
 
-                using var viewportBrush = new SolidBrush(Color.FromArgb(30, 255, 255, 255));
-                g.FillRectangle(viewportBrush, 0, viewportY, minimapPanel.Width, viewportHeight);
+                float thumbHeight = Math.Max(20, (float)visibleLines / totalLines * minimapPanel.Height);
+                float maxThumbTop = minimapPanel.Height - thumbHeight;
+                float scrollPercent = (float)firstVisibleLine / (totalLines - visibleLines);
+                float thumbY = scrollPercent * maxThumbTop;
+
+                using var thumbBrush = new SolidBrush(Color.FromArgb(60, 60, 60));
+                g.FillRectangle(thumbBrush, scrollTrackX + 1, thumbY, 8, thumbHeight);
             }
         }
     }
@@ -798,8 +754,7 @@ public class MainForm : Form
     {
         UpdateLineNumbers();
         HighlightSyntax(); // Real-time syntax highlighting
-        UpdateScrollbarThumb(); // Check if scrollbar needs to appear/disappear
-        minimapPanel?.Invalidate();
+        minimapPanel?.Invalidate(); // Minimap includes scrollbar
         indentGuidesPanel?.Invalidate();
     }
 
@@ -818,44 +773,8 @@ public class MainForm : Form
             }
         }
 
-        UpdateScrollbarThumb();
-        minimapPanel?.Invalidate();
+        minimapPanel?.Invalidate(); // Minimap includes scrollbar
         indentGuidesPanel?.Invalidate();
-    }
-
-    private void UpdateScrollbarThumb()
-    {
-        if (scrollbarThumb == null || scrollbarPanel == null || codeEditor == null) return;
-
-        int totalLines = Math.Max(1, codeEditor.Lines.Length);
-        int visibleLines = Math.Max(1, codeEditor.Height / codeEditor.Font.Height);
-
-        // Show/hide scrollbar based on content length
-        bool needsScrollbar = totalLines > visibleLines;
-        if (scrollbarPanel.Visible != needsScrollbar)
-        {
-            scrollbarPanel.Visible = needsScrollbar;
-            // Resize editor when scrollbar visibility changes
-            codeEditor.Width = editorPanel.Width - 55 - 100 - (needsScrollbar ? 12 : 0);
-        }
-
-        if (!needsScrollbar || isScrollbarDragging) return;
-
-        // Calculate thumb size based on visible vs total content
-        int minThumbHeight = 30;
-        int thumbHeight = (int)((float)visibleLines / totalLines * scrollbarPanel.Height);
-        thumbHeight = Math.Max(minThumbHeight, Math.Min(scrollbarPanel.Height, thumbHeight));
-        scrollbarThumb.Height = thumbHeight;
-
-        // Calculate thumb position
-        int firstVisibleChar = codeEditor.GetCharIndexFromPosition(new Point(0, 0));
-        int firstVisibleLine = codeEditor.GetLineFromCharIndex(firstVisibleChar);
-
-        float scrollPercent = totalLines > visibleLines ? (float)firstVisibleLine / (totalLines - visibleLines) : 0;
-        int maxThumbTop = scrollbarPanel.Height - scrollbarThumb.Height;
-        scrollbarThumb.Top = (int)(scrollPercent * maxThumbTop);
-
-        RoundCorners(scrollbarThumb, 4);
     }
 
     private void UpdateLineNumbers()
